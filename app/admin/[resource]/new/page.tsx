@@ -21,7 +21,7 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canCreateResource(currentUser, res)) throw new Error("You do not have permission to create this record.");
-    await delegate(res.model).create({ data: formToData(res, formData) });
+    await delegate(res.model).create({ data: await formToData(res, formData, "create") });
     redirect(`/admin/${res.key}`);
   }
   return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><h1 style={{fontSize:30,fontWeight:900}}>Add {resource.title}</h1><ResourceForm resource={resource} action={createAction} button="Create Record" /></>;

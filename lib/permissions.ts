@@ -3,9 +3,23 @@ import { resources, type Resource } from "./adminConfig";
 
 const ROLE_RESOURCES: Record<string, string[]> = {
   admin: resources.map((resource) => resource.key),
-  accountant: ["incomes", "expenses", "cases", "clients"],
-  case_officer: ["clients", "cases", "appointments", "documents", "families"],
-  receptionist: ["clients", "appointments", "leads", "visitors"],
+  accountant: ["incomes", "expenses", "case-installments", "cases", "clients"],
+  case_officer: ["clients", "cases", "case-installments", "appointments", "documents", "families", "reminders"],
+  receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
+  teacher: ["ielts", "life-skills"],
+};
+
+const ROLE_CREATE_RESOURCES: Record<string, string[]> = {
+  accountant: ["incomes", "expenses", "case-installments"],
+  case_officer: ["cases", "case-installments", "documents", "families", "reminders"],
+  receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
+  teacher: ["ielts", "life-skills"],
+};
+
+const ROLE_EDIT_RESOURCES: Record<string, string[]> = {
+  accountant: ["incomes", "expenses", "case-installments"],
+  case_officer: ["cases", "case-installments", "documents", "families", "reminders"],
+  receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
 };
 
@@ -36,12 +50,10 @@ export function canCreateResource(user: CurrentUser, resource: Resource) {
   if (!canViewResource(user, resource.key)) return false;
 
   if (resource.key === "cases") return user.permissionSlugs.includes("start-cases");
-  if (resource.key === "incomes") return user.permissionSlugs.includes("add-installment") || user.roleSlugs.includes("accountant");
-  if (resource.key === "expenses") return user.roleSlugs.includes("accountant");
-  if (resource.key === "appointments") return user.roleSlugs.includes("receptionist");
-  if (resource.key === "ielts" || resource.key === "life-skills") return user.roleSlugs.includes("teacher");
+  if (resource.key === "case-installments") return user.permissionSlugs.includes("add-installment");
+  if (resource.key === "incomes") return user.permissionSlugs.includes("add-installment") || hasRoleResource(user, resource.key, ROLE_CREATE_RESOURCES);
 
-  return false;
+  return hasRoleResource(user, resource.key, ROLE_CREATE_RESOURCES);
 }
 
 export function canEditResource(user: CurrentUser, resource: Resource) {
@@ -50,12 +62,9 @@ export function canEditResource(user: CurrentUser, resource: Resource) {
 
   if (resource.key === "clients") return user.permissionSlugs.includes("edit-clients");
   if (resource.key === "cases") return user.permissionSlugs.includes("assign-cases") || user.roleSlugs.includes("case_officer");
-  if (resource.key === "incomes" || resource.key === "expenses") return user.roleSlugs.includes("accountant");
-  if (resource.key === "appointments") return user.roleSlugs.includes("receptionist");
-  if (resource.key === "documents" || resource.key === "families") return user.roleSlugs.includes("case_officer");
-  if (resource.key === "ielts" || resource.key === "life-skills") return user.roleSlugs.includes("teacher");
+  if (resource.key === "case-installments") return user.permissionSlugs.includes("add-installment");
 
-  return false;
+  return hasRoleResource(user, resource.key, ROLE_EDIT_RESOURCES);
 }
 
 export function canDeleteResource(user: CurrentUser, resource: Resource) {
@@ -63,4 +72,8 @@ export function canDeleteResource(user: CurrentUser, resource: Resource) {
   if (!canViewResource(user, resource.key)) return false;
   if (resource.key === "clients") return user.permissionSlugs.includes("delete-client");
   return user.permissionSlugs.includes("delete");
+}
+
+function hasRoleResource(user: CurrentUser, resourceKey: string, map: Record<string, string[]>) {
+  return user.roleSlugs.some((role) => map[role]?.includes(resourceKey));
 }
