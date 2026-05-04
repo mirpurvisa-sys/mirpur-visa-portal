@@ -44,7 +44,9 @@ export const resources: Resource[] = [
       "subject_id",
       "causer_type",
       "causer_id",
-      "created_at"
+      "properties",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -127,7 +129,8 @@ export const resources: Resource[] = [
       "appointmentstatus",
       "category",
       "appointmentdate",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -194,7 +197,8 @@ export const resources: Resource[] = [
       "name",
       "amount",
       "time",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -247,8 +251,8 @@ export const resources: Resource[] = [
       "firstname",
       "lastname",
       "email",
-      "phone",
-      "phone2"
+      "epassword",
+      "phone"
     ],
     "columns": [
       "id",
@@ -258,7 +262,24 @@ export const resources: Resource[] = [
       "email",
       "epassword",
       "phone",
-      "phone2"
+      "phone2",
+      "cnic",
+      "cnic_issue",
+      "cnic_expiry",
+      "gender",
+      "avatar",
+      "city",
+      "province",
+      "country",
+      "address",
+      "destination_country",
+      "visa_category",
+      "passport_no",
+      "passport_issue",
+      "passport_expiry",
+      "documents",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -296,7 +317,7 @@ export const resources: Resource[] = [
       {
         "name": "epassword",
         "label": "Epassword",
-        "type": "password",
+        "type": "text",
         "required": false,
         "requiredOnCreate": false,
         "optionalOnEdit": false
@@ -466,7 +487,27 @@ export const resources: Resource[] = [
       "client_name",
       "total",
       "advance",
-      "remaining"
+      "remaining",
+      "total_paid",
+      "caseCategory",
+      "startDate",
+      "endDate",
+      "submitted_on",
+      "travel_dates",
+      "docs",
+      "email_gen",
+      "travel_history",
+      "previous_refusal",
+      "vfa",
+      "dfa",
+      "personal_documents",
+      "job_documents",
+      "business_documents",
+      "documents_note",
+      "status",
+      "description",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -696,7 +737,8 @@ export const resources: Resource[] = [
       "title",
       "category",
       "description",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -750,7 +792,8 @@ export const resources: Resource[] = [
       "priority",
       "description",
       "date_time",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -823,7 +866,8 @@ export const resources: Resource[] = [
       "client_case_id",
       "document",
       "document_type",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -879,7 +923,14 @@ export const resources: Resource[] = [
       "lastname",
       "phone",
       "designation",
-      "joining_date"
+      "joining_date",
+      "city",
+      "province",
+      "country",
+      "address",
+      "salary",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1006,7 +1057,8 @@ export const resources: Resource[] = [
       "Amount",
       "Description",
       "Date",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1079,6 +1131,8 @@ export const resources: Resource[] = [
       "id",
       "connection",
       "queue",
+      "payload",
+      "exception",
       "failed_at"
     ],
     "fields": [
@@ -1143,7 +1197,22 @@ export const resources: Resource[] = [
       "lastname",
       "phone",
       "email",
-      "dob"
+      "dob",
+      "cnic_no",
+      "gender",
+      "avatar",
+      "cnic_issue",
+      "cnic_expiry",
+      "visa_category",
+      "destination_country",
+      "passport_no",
+      "passport_issue",
+      "passport_expiry",
+      "passport_attach",
+      "address",
+      "relationship",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1335,7 +1404,23 @@ export const resources: Resource[] = [
       "cnic",
       "gender",
       "avatar",
-      "address"
+      "address",
+      "band_required",
+      "country",
+      "category",
+      "a_result",
+      "fee",
+      "joining_date",
+      "ending_date",
+      "listening",
+      "reading",
+      "writing",
+      "speaking",
+      "overall",
+      "cefr",
+      "remarks",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1539,6 +1624,7 @@ export const resources: Resource[] = [
       "Description",
       "Date",
       "created_at",
+      "updated_at",
       "foreign_id"
     ],
     "fields": [
@@ -1620,7 +1706,16 @@ export const resources: Resource[] = [
       "cnic",
       "gender",
       "avatar",
-      "address"
+      "address",
+      "admission_date",
+      "level",
+      "fee",
+      "test_dates",
+      "results",
+      "cefr",
+      "remarks",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1797,8 +1892,10 @@ export const resources: Resource[] = [
       "type",
       "notifiable_type",
       "notifiable_id",
+      "data",
       "read_at",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1909,7 +2006,8 @@ export const resources: Resource[] = [
       "id",
       "name",
       "slug",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -1954,7 +2052,8 @@ export const resources: Resource[] = [
       "description",
       "date",
       "reminded",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -2026,7 +2125,8 @@ export const resources: Resource[] = [
       "id",
       "name",
       "slug",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -2113,7 +2213,13 @@ export const resources: Resource[] = [
       "email",
       "phone",
       "cnic",
-      "gender"
+      "gender",
+      "avatar",
+      "email_verified_at",
+      "password",
+      "remember_token",
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {
@@ -2291,7 +2397,8 @@ export const resources: Resource[] = [
       "category",
       "phone",
       "description",
-      "created_at"
+      "created_at",
+      "updated_at"
     ],
     "fields": [
       {

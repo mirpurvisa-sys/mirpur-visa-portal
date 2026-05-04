@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const sqlFile = process.argv[2] || "mirpurvisaportal_portal.postgres.sql";
 const outputFile = process.argv[3] || "lib/adminConfig.ts";
+const csvFile = process.argv[4] || "C:/Users/Lenovo/Downloads/Supabase Snippet List Public Base Tables (1).csv";
 const sql = readFileSync(sqlFile, "utf8");
 
 const titleOverrides = {
@@ -35,11 +36,12 @@ const keyOverrides = {
 const tables = parseTables(sql);
 const primaryKeys = parsePrimaryKeys(sql);
 const identityColumns = parseIdentityColumns(sql);
+const csvColumns = readCsvColumns(csvFile);
 
 const resources = tables.map((table) => {
   const primaryKey = primaryKeys.get(table.name) || inferPrimaryKey(table);
   const identity = identityColumns.get(table.name) || [];
-  const columns = chooseDisplayColumns(table, primaryKey);
+  const columns = chooseDisplayColumns(table, csvColumns.get(table.name));
   const fields = chooseFields(table, primaryKey, identity);
 
   return {
@@ -143,17 +145,11 @@ function inferPrimaryKey(table) {
   return table.columns.slice(0, 1).map((column) => column.name);
 }
 
-function chooseDisplayColumns(table, primaryKey) {
-  const sensitive = new Set(["password", "remember_token", "payload", "exception", "properties", "data"]);
-  const system = new Set(["updated_at", "email_verified_at"]);
-  const preferred = table.columns
-    .map((column) => column.name)
-    .filter((name) => !sensitive.has(name) && !system.has(name));
-  const base = [...primaryKey, ...preferred.filter((name) => !primaryKey.includes(name))];
-  const withCreatedAt = table.columns.some((column) => column.name === "created_at") && !base.includes("created_at")
-    ? [...base.slice(0, 7), "created_at"]
-    : base;
-  return withCreatedAt.slice(0, 8);
+function chooseDisplayColumns(table, csvColumnList) {
+  const actualColumns = new Set(table.columns.map((column) => column.name));
+  const columns = (csvColumnList?.length ? csvColumnList : table.columns.map((column) => column.name))
+    .filter((column) => actualColumns.has(column));
+  return columns.length ? columns : table.columns.map((column) => column.name);
 }
 
 function chooseSearchFields(table, primaryKey) {
@@ -188,7 +184,7 @@ function chooseFields(table, primaryKey, identity) {
 function fieldType(column) {
   const name = column.name.toLowerCase();
   const type = column.type;
-  if (name.includes("password")) return "password";
+  if (name === "password") return "password";
   if (name === "email" || name.endsWith("_email")) return "email";
   if (type === "timestamp") return "datetime";
   if (type === "date") return "date";
@@ -217,6 +213,61 @@ function shouldUseTextarea(name) {
 
 function isDecimal(definition) {
   return /\bnumeric\(|\bdouble precision\b/i.test(definition);
+}
+
+function readCsvColumns(file) {
+  try {
+    const source = readFileSync(file, "utf8");
+    const rows = parseCsv(source);
+    const map = new Map();
+
+    for (const row of rows.slice(1)) {
+      const [tableName, columns] = row;
+      if (!tableName || !columns) continue;
+      map.set(tableName, columns.split(",").map((column) => column.trim()).filter(Boolean));
+    }
+
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function parseCsv(source) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (char === "\"" && inQuotes && next === "\"") {
+      value += "\"";
+      index++;
+    } else if (char === "\"") {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index++;
+      row.push(value);
+      rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  if (value || row.length) {
+    row.push(value);
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 function toTitle(value) {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getResource } from "@/lib/adminConfig";
-import { buildWhere, delegate, formatValue, recordKey } from "@/lib/crud";
+import { buildWhere, delegate, formatCellValue, recordKey } from "@/lib/crud";
 import { requireUser } from "@/lib/auth";
 import { canCreateResource, canEditResource, canSearch, requireResourceAccess } from "@/lib/permissions";
 
@@ -36,10 +36,10 @@ export default async function ResourcePage({ params, searchParams }: { params: P
     {userCanSearch ? <div className="card" style={{padding:16,marginBottom:16}}>
       <form style={{display:"flex",gap:10}}><input className="input" name="q" defaultValue={q} placeholder={`Search ${resource.title}...`} /><button className="btn">Search</button></form>
     </div> : null}
-    <div className="card" style={{overflow:"hidden"}}><table className="table"><thead><tr>{resource.columns.map(c => <th key={c}>{c}</th>)}<th>Action</th></tr></thead><tbody>
+    <div className="card tableWrap"><table className="table dataTable"><thead><tr>{resource.columns.map(c => <th key={c}>{c}</th>)}<th className="actionColumn">Action</th></tr></thead><tbody>
       {rows.map((row:any) => {
         const key = recordKey(resource, row);
-        return <tr key={key}>{resource.columns.map(c => <td key={c}>{formatValue(row[c])}</td>)}<td>{userCanEdit ? <Link className="btn" href={`/admin/${resource.key}/${key}/edit`}>Edit</Link> : <span style={{color:"#94a3b8"}}>View only</span>}</td></tr>;
+        return <tr key={key}>{resource.columns.map(c => <td key={c}>{formatCellValue(c, row[c])}</td>)}<td className="actionColumn">{userCanEdit ? <Link className="btn" href={`/admin/${resource.key}/${key}/edit`}>Edit</Link> : <span style={{color:"#94a3b8"}}>View only</span>}</td></tr>;
       })}
     </tbody></table></div>
   </>;

@@ -67,8 +67,14 @@ export function formatValue(value: any) {
   if (value === null || value === undefined) return "-";
   if (typeof value === "bigint") return value.toString();
   if (value instanceof Date) return value.toISOString().slice(0, 10);
-  if (typeof value === "object" && value?.toString) return value.toString();
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
+}
+
+export function formatCellValue(column: string, value: any) {
+  if (isSensitiveColumn(column) && value !== null && value !== undefined && value !== "") return "Hidden";
+  const formatted = formatValue(value);
+  return formatted.length > 180 ? `${formatted.slice(0, 177)}...` : formatted;
 }
 
 export function recordKey(resource: Resource, row: AnyObj) {
@@ -196,6 +202,11 @@ function coerceFieldValue(resource: Resource, fieldName: string, value: any) {
     return Number.isNaN(numeric) ? value : numeric;
   }
   return String(value);
+}
+
+function isSensitiveColumn(column: string) {
+  const name = column.toLowerCase();
+  return name === "password" || name === "remember_token" || name === "token";
 }
 
 function quoteIdent(identifier: string) {

@@ -11,7 +11,58 @@ input, select, textarea { outline: none; }
 .btnPrimary { background:#0b3954; color:white; border-color:#0b3954; }
 .input { width:100%; border:1px solid #d6dbe7; border-radius:12px; padding:11px 12px; background:#fff; }
 .label { display:block; font-size:12px; font-weight:800; color:#475569; margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em; }
+.tableWrap { overflow:auto; max-width:100%; }
 .table { width:100%; border-collapse: collapse; }
-.table th { text-align:left; font-size:12px; color:#64748b; padding:14px; background:#f8fafc; }
-.table td { padding:14px; border-top:1px solid #eef2f7; font-size:14px; vertical-align:top; }
+.dataTable { width:max-content; min-width:100%; }
+.table th { text-align:left; font-size:12px; color:#64748b; padding:14px; background:#f8fafc; white-space:nowrap; }
+.table td { padding:14px; border-top:1px solid #eef2f7; font-size:14px; vertical-align:top; max-width:260px; overflow-wrap:anywhere; }
+.actionColumn { position:sticky; right:0; background:#fff; box-shadow:-1px 0 0 #eef2f7; white-space:nowrap; }
+.table th.actionColumn { background:#f8fafc; }
 .badge { border-radius:999px; padding:5px 10px; background:#eef6ff; color:#0b3954; font-size:12px; font-weight:800; }
+.erpHeader { display:flex; justify-content:space-between; align-items:flex-start; gap:18px; margin-bottom:20px; }
+.erpHeader h1 { font-size:34px; line-height:1; font-weight:900; margin:4px 0 8px; }
+.erpHeader p { color:#64748b; margin:0; max-width:720px; }
+.eyebrow { color:#0b3954; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.08em; }
+.panel { background:#fff; border:1px solid #e5e7eb; border-radius:8px; box-shadow:0 10px 30px rgba(15,23,42,.05); padding:18px; margin-bottom:18px; }
+.panel h2 { margin:0 0 14px; font-size:18px; font-weight:900; }
+.metricGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:18px; }
+.metricCard { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:16px; box-shadow:0 10px 30px rgba(15,23,42,.05); }
+.metricCard strong { display:block; font-size:26px; margin-top:8px; }
+.metricTop { display:flex; justify-content:space-between; align-items:center; gap:10px; color:#64748b; font-size:12px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+.metricWarn { border-color:#fed7aa; background:#fff7ed; }
+.workflowGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+.workflowCard { display:grid; gap:6px; background:#fff; border:1px solid #dbe3ef; border-radius:8px; padding:18px; box-shadow:0 10px 30px rgba(15,23,42,.05); }
+.workflowCard strong { font-size:18px; }
+.workflowCard span, .muted { color:#64748b; font-size:13px; }
+.filterBar, .inlineForm { display:grid; grid-template-columns:minmax(220px,1fr) minmax(180px,260px) auto; gap:10px; align-items:end; }
+.formSection { display:grid; gap:14px; }
+.formGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+.formGrid.single { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+.erpForm { display:grid; gap:18px; }
+.formActions, .headerActions, .sectionHeader { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+.workspaceGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:18px; align-items:start; }
+.checkGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; color:#334155; font-size:13px; text-transform:capitalize; }
+.statusPill { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; white-space:nowrap; }
+.dangerPill { background:#fef2f2; color:#b91c1c; }
+.dangerPanel { border-color:#fecaca; background:#fff1f2; color:#991b1b; }
+.dangerButton { color:#b91c1c; border-color:#fecaca; background:#fff7f7; }
+.iconDanger { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:8px; border:1px solid #fecaca; color:#b91c1c; background:#fff7f7; }
+.emptyState { padding:22px; color:#64748b; text-align:center; }
+.employeeGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+.employeeCard { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:16px; display:grid; gap:12px; box-shadow:0 10px 30px rgba(15,23,42,.05); }
+.employeeTop { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.employeeTop strong, .employeeTop span { display:block; }
+.employeeTop span { color:#64748b; font-size:13px; margin-top:4px; }
+.employeeStats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.employeeStats span { background:#f8fafc; border:1px solid #edf2f7; border-radius:8px; padding:10px; color:#64748b; font-size:12px; }
+.employeeStats strong { display:block; color:#0f172a; margin-top:4px; }
+.editDrawer { border-top:1px solid #eef2f7; padding-top:10px; }
+.editDrawer summary { cursor:pointer; font-weight:800; color:#0b3954; }
+.compactForm { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:12px; }
+.appointmentList { display:grid; gap:12px; }
+.appointmentItem { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,.8fr) minmax(120px,.5fr) auto; gap:14px; align-items:center; }
+@media (max-width: 760px) {
+  .erpHeader, .appointmentItem { display:grid; }
+  .filterBar, .inlineForm { grid-template-columns:1fr; }
+  .workspaceGrid { grid-template-columns:1fr; }
+}
