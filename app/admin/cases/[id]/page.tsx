@@ -112,8 +112,8 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
     await getDb().query(
       `UPDATE "appointments" SET appointmentstatus=$1, category=$2, appointmentdate=$3, fee=$4, updated_at=NOW() WHERE id=$5`,
       [
-        text(formData, "appointmentstatus", "Scheduled"),
-        text(formData, "appointment_category", text(formData, "caseCategory")),
+        text(formData, "appointmentstatus", "Unpaid"),
+        text(formData, "appointment_category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
         numberValue(formData, "appointment_fee"),
         Number(formData.get("appointment_id")),
@@ -223,8 +223,8 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
           <Field name="travel_dates" label="Travel dates" defaultValue={caseRow.travel_dates} disabled={!canEdit} />
           <Field name="docs" label="Docs status" defaultValue={caseRow.docs} disabled={!canEdit} />
           <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={caseRow.appointment_fee} disabled={!canEdit} />
-          <Field name="appointment_category" label="Appointment category" defaultValue={caseRow.appointment_category} disabled={!canEdit} />
-          <Field name="appointmentstatus" label="Appointment status" defaultValue={caseRow.appointmentstatus} disabled={!canEdit} />
+          <Select name="appointment_category" label="Appointment type" value={caseRow.appointment_category || "visit"} disabled={!canEdit} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
+          <Select name="appointmentstatus" label="Payment status" value={caseRow.appointmentstatus || "Unpaid"} disabled={!canEdit} options={["Paid", "Unpaid"]} />
           <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(caseRow.appointmentdate)} disabled={!canEdit} required />
           <Field name="documents_note" label="Document notes" defaultValue={caseRow.documents_note} disabled={!canEdit} wide />
           <Textarea name="description" label="Description" defaultValue={caseRow.description} disabled={!canEdit} />
@@ -298,8 +298,12 @@ function EmployeeSelect({ employees, value, disabled }: { employees: Awaited<Ret
   return <div><label className="label">Assigned employee</label><select className="input" name="employee_id" defaultValue={String(value ?? "")} disabled={disabled} required>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.label} {employee.detail ? `- ${employee.detail}` : ""}</option>)}</select></div>;
 }
 
-function Select({ name, label, value, options, disabled }: { name: string; label: string; value?: string; options: string[]; disabled?: boolean }) {
-  return <div><label className="label">{label}</label><select className="input" name={name} defaultValue={value} disabled={disabled}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></div>;
+function Select({ name, label, value, options, disabled }: { name: string; label: string; value?: string; options: Array<string | { value: string; label: string }>; disabled?: boolean }) {
+  return <div><label className="label">{label}</label><select className="input" name={name} defaultValue={value} disabled={disabled}>{options.map((option) => {
+    const optionValue = typeof option === "string" ? option : option.value;
+    const optionLabel = typeof option === "string" ? option : option.label;
+    return <option key={optionValue} value={optionValue}>{optionLabel}</option>;
+  })}</select></div>;
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "warn" }) {

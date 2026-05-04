@@ -1,21 +1,24 @@
 import { redirect } from "next/navigation";
 import { Plus, UserRoundCheck } from "lucide-react";
+import bcrypt from "bcryptjs";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, canDeleteResource, canEditResource, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canDeleteResource, canEditResource, canViewResource, isAdmin } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { dateValue, money, nullableText, numberValue, text, today } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmployeesPage() {
+export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ reset_error?: string; reset_success?: string }> }) {
   const user = await requireUser();
+  const params = await searchParams;
   const resource = getResource("employees");
   if (!resource || !canViewResource(user, "employees")) return <AccessDenied />;
 
   const canCreate = canCreateResource(user, resource);
   const canEdit = canEditResource(user, resource);
   const canDelete = canDeleteResource(user, resource);
+  const canResetPasswords = isAdmin(user);
   const employees = await getEmployees();
 
   async function createEmployee(formData: FormData) {
@@ -89,6 +92,26 @@ export default async function EmployeesPage() {
     redirect("/admin/employees");
   }
 
+  async function resetEmployeePassword(formData: FormData) {
+    "use server";
+    const currentUser = await requireUser();
+    if (!isAdmin(currentUser)) redirect("/admin/employees?reset_error=not_allowed");
+
+    const password = text(formData, "password");
+    const confirmPassword = text(formData, "confirm_password");
+    if (password.length < 8) redirect("/admin/employees?reset_error=short_password");
+    if (password !== confirmPassword) redirect("/admin/employees?reset_error=mismatch");
+
+    const employeeId = numberValue(formData, "employee_id");
+    const employee = await getDb().query(`SELECT user_id FROM "employees" WHERE id=$1 LIMIT 1`, [employeeId]);
+    const userId = Number(employee.rows[0]?.user_id || 0);
+    if (!userId) redirect("/admin/employees?reset_error=not_linked");
+
+    const hash = await bcrypt.hash(password, 10);
+    await getDb().query(`UPDATE "users" SET password=$1, updated_at=NOW() WHERE id=$2`, [hash, userId]);
+    redirect("/admin/employees?reset_success=1");
+  }
+
   const totalSalary = employees.reduce((sum, employee) => sum + Number(employee.salary || 0), 0);
 
   return <>
@@ -106,6 +129,9 @@ export default async function EmployeesPage() {
       <Metric label="Monthly salary" value={money(totalSalary)} />
       <Metric label="Open workload" value={employees.reduce((sum, row) => sum + Number(row.open_cases || 0), 0).toLocaleString()} />
     </div>
+
+    {params.reset_error ? <div className="notice errorNotice">{resetErrorMessage(params.reset_error)}</div> : null}
+    {params.reset_success ? <div className="notice successNotice">Employee password was reset successfully.</div> : null}
 
     {canCreate ? <form action={createEmployee} className="panel formSection">
       <div className="sectionHeader"><h2>Add Employee</h2><span className="badge">HR record</span></div>
@@ -138,6 +164,7 @@ export default async function EmployeesPage() {
           <span>Salary <strong>{money(employee.salary)}</strong></span>
         </div>
         <p className="muted">{employee.phone} - {employee.city}, {employee.country}</p>
+        <p className="muted">Login: {employee.user_email || `User #${employee.user_id}`}</p>
 
         {canEdit ? <details className="editDrawer">
           <summary>Edit employee</summary>
@@ -159,6 +186,16 @@ export default async function EmployeesPage() {
           </form>
         </details> : null}
 
+        {canResetPasswords ? <details className="editDrawer passwordReset">
+          <summary>Reset login password</summary>
+          <form action={resetEmployeePassword} className="compactForm">
+            <input type="hidden" name="employee_id" value={employee.id} />
+            <Field name="password" label="New password" type="password" required minLength={8} autoComplete="new-password" />
+            <Field name="confirm_password" label="Confirm password" type="password" required minLength={8} autoComplete="new-password" />
+            <button className="btn btnPrimary">Reset Password</button>
+          </form>
+        </details> : null}
+
         {canDelete ? <form action={deleteEmployee}><input type="hidden" name="id" value={employee.id}/><button className="btn dangerButton" disabled={Number(employee.assigned_cases) > 0}>Delete</button></form> : null}
       </article>)}
     </div>
@@ -169,11 +206,13 @@ async function getEmployees() {
   const result = await getDb().query(`
     SELECT
       e.*,
+      u.email AS user_email,
       COUNT(cc.id)::int AS assigned_cases,
       COUNT(cc.id) FILTER (WHERE COALESCE(cc.status, 'Open') NOT IN ('Completed', 'Closed'))::int AS open_cases
     FROM "employees" e
+    LEFT JOIN "users" u ON u.id = e.user_id
     LEFT JOIN "client_cases" cc ON cc.employee_id = e.id
-    GROUP BY e.id
+    GROUP BY e.id, u.email
     ORDER BY e.firstname ASC, e.lastname ASC
   `);
   return result.rows;
@@ -183,8 +222,8 @@ function Metric({ label, value, icon }: { label: string; value: string; icon?: R
   return <div className="metricCard"><div className="metricTop"><span>{label}</span>{icon}</div><strong>{value}</strong></div>;
 }
 
-function Field({ name, label, type = "text", defaultValue, required, wide }: { name: string; label: string; type?: string; defaultValue?: unknown; required?: boolean; wide?: boolean }) {
-  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input className="input" name={name} type={type} defaultValue={value(defaultValue)} required={required} step={type === "number" ? "0.01" : undefined}/></div>;
+function Field({ name, label, type = "text", defaultValue, required, wide, minLength, autoComplete }: { name: string; label: string; type?: string; defaultValue?: unknown; required?: boolean; wide?: boolean; minLength?: number; autoComplete?: string }) {
+  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input className="input" name={name} type={type} defaultValue={value(defaultValue)} required={required} step={type === "number" ? "0.01" : undefined} minLength={minLength} autoComplete={autoComplete}/></div>;
 }
 
 function AccessDenied() {
@@ -199,4 +238,14 @@ function value(input: unknown) {
 
 function formatDate(input: unknown) {
   return value(input).slice(0, 10);
+}
+
+function resetErrorMessage(code: string) {
+  const messages: Record<string, string> = {
+    mismatch: "Password confirmation does not match. Please enter the same password in both fields.",
+    short_password: "Password must be at least 8 characters.",
+    not_linked: "This employee is not linked to a login user.",
+    not_allowed: "Only admins can reset employee passwords.",
+  };
+  return messages[code] || "Password could not be reset. Please try again.";
 }

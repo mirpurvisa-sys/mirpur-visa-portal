@@ -8,12 +8,18 @@ import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime
 
 export const dynamic = "force-dynamic";
 
-export default async function NewCasePage() {
+export default async function NewCasePage({ searchParams }: { searchParams: Promise<{ appointment_id?: string }> }) {
   const user = await requireUser();
   const resource = getResource("cases");
   if (!canViewResource(user, "cases") || !resource || !canCreateResource(user, resource)) return <AccessDenied />;
 
-  const employees = await employeeOptions();
+  const params = await searchParams;
+  const appointmentId = Number(params.appointment_id || 0);
+  const [employees, appointment] = await Promise.all([
+    employeeOptions(),
+    appointmentId > 0 ? getAppointmentIntake(appointmentId) : Promise.resolve(null),
+  ]);
+  if (appointment?.case_id) redirect(`/admin/cases/${appointment.case_id}`);
 
   async function createCase(formData: FormData) {
     "use server";
@@ -26,57 +32,64 @@ export default async function NewCasePage() {
     const total = numberValue(formData, "total");
     const initialPayment = numberValue(formData, "initial_payment");
     const clientName = `${text(formData, "firstname")} ${text(formData, "lastname")}`.trim();
+    const existingClientId = numberValue(formData, "existing_client_id");
+    const existingAppointmentId = numberValue(formData, "existing_appointment_id");
+    let clientId = existingClientId;
+    let appointmentIdForCase = existingAppointmentId;
 
-    const client = await db.query(
-      `
-        INSERT INTO "clients" (
-          ref_id, firstname, lastname, email, phone, phone2, cnic, gender, avatar,
-          city, province, country, address, destination_country, visa_category,
-          passport_no, passport_issue, passport_expiry, documents, created_at, updated_at
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20)
-        RETURNING id
-      `,
-      [
-        nullableText(formData, "ref_id"),
-        text(formData, "firstname"),
-        text(formData, "lastname"),
-        nullableText(formData, "email"),
-        text(formData, "phone"),
-        nullableText(formData, "phone2"),
-        nullableText(formData, "cnic"),
-        text(formData, "gender", "Male"),
-        text(formData, "avatar", "user.jpg"),
-        nullableText(formData, "city"),
-        nullableText(formData, "province"),
-        nullableText(formData, "country"),
-        text(formData, "address", "Not provided"),
-        nullableText(formData, "destination_country"),
-        nullableText(formData, "visa_category"),
-        nullableText(formData, "passport_no"),
-        nullableText(formData, "passport_issue"),
-        nullableText(formData, "passport_expiry"),
-        nullableText(formData, "documents"),
-        now,
-      ],
-    );
+    if (clientId > 0) {
+      await db.query(
+        `
+          UPDATE "clients"
+          SET ref_id=$1, firstname=$2, lastname=$3, email=$4, phone=$5, phone2=$6, cnic=$7,
+              gender=$8, avatar=$9, city=$10, province=$11, country=$12, address=$13,
+              destination_country=$14, visa_category=$15, passport_no=$16, passport_issue=$17,
+              passport_expiry=$18, documents=$19, updated_at=$20
+          WHERE id=$21
+        `,
+        clientValues(formData, now, clientId),
+      );
+    } else {
+      const client = await db.query(
+        `
+          INSERT INTO "clients" (
+            ref_id, firstname, lastname, email, phone, phone2, cnic, gender, avatar,
+            city, province, country, address, destination_country, visa_category,
+            passport_no, passport_issue, passport_expiry, documents, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20)
+          RETURNING id
+        `,
+        clientValues(formData, now),
+      );
+      clientId = Number(client.rows[0].id);
+    }
 
-    const clientId = Number(client.rows[0].id);
-    const appointment = await db.query(
-      `
-        INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$6)
-        RETURNING id
-      `,
-      [
-        clientId,
-        numberValue(formData, "appointment_fee"),
-        text(formData, "appointmentstatus", "Scheduled"),
-        text(formData, "caseCategory", "Consultation"),
-        dateTimeValue(formData, "appointmentdate"),
-        now,
-      ],
-    );
+    if (appointmentIdForCase > 0) {
+      const existingCase = await db.query(`SELECT id FROM "client_cases" WHERE appointment_id=$1 LIMIT 1`, [appointmentIdForCase]);
+      if (existingCase.rows[0]?.id) redirect(`/admin/cases/${existingCase.rows[0].id}`);
+      await db.query(
+        `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=$5 WHERE id=$6`,
+        [numberValue(formData, "appointment_fee"), text(formData, "appointmentstatus", "Unpaid"), text(formData, "appointment_category", "visit"), dateTimeValue(formData, "appointmentdate"), now, appointmentIdForCase],
+      );
+    } else {
+      const appointment = await db.query(
+        `
+          INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$6)
+          RETURNING id
+        `,
+        [
+          clientId,
+          numberValue(formData, "appointment_fee"),
+          text(formData, "appointmentstatus", "Unpaid"),
+          text(formData, "appointment_category", "visit"),
+          dateTimeValue(formData, "appointmentdate"),
+          now,
+        ],
+      );
+      appointmentIdForCase = Number(appointment.rows[0].id);
+    }
 
     const caseResult = await db.query(
       `
@@ -91,7 +104,7 @@ export default async function NewCasePage() {
       `,
       [
         clientId,
-        Number(appointment.rows[0].id),
+        appointmentIdForCase,
         numberValue(formData, "employee_id"),
         clientName,
         total,
@@ -135,36 +148,40 @@ export default async function NewCasePage() {
     <div className="erpHeader">
       <div>
         <div className="eyebrow">Case intake</div>
-        <h1>New Case</h1>
-        <p>Create the client profile, appointment, case assignment, and first payment together.</p>
+        <h1>{appointment ? "Start Case From Appointment" : "New Case"}</h1>
+        <p>{appointment ? "Use the booked appointment and client details to open a full case." : "Create the client profile, appointment, case assignment, and first payment together."}</p>
       </div>
-      <Link className="btn" href="/admin/cases">Back to Cases</Link>
+      <Link className="btn" href={appointment ? "/admin/appointments" : "/admin/cases"}>{appointment ? "Back to Appointments" : "Back to Cases"}</Link>
     </div>
 
     {employees.length === 0 ? <div className="panel dangerPanel">Create at least one employee before opening a case. The database requires every case to be assigned.</div> : null}
 
     <form action={createCase} className="erpForm">
+      {appointment ? <>
+        <input type="hidden" name="existing_client_id" value={appointment.client_id} />
+        <input type="hidden" name="existing_appointment_id" value={appointment.id} />
+      </> : null}
       <section className="panel formSection">
         <h2>Client</h2>
         <div className="formGrid">
-          <Field name="ref_id" label="Reference ID" />
-          <Field name="firstname" label="First name" required />
-          <Field name="lastname" label="Last name" required />
-          <Field name="email" label="Email" type="email" />
-          <Field name="phone" label="Phone" required />
-          <Field name="phone2" label="Second phone" />
-          <Field name="cnic" label="CNIC" />
-          <Select name="gender" label="Gender" options={["Male", "Female", "Other"]} />
-          <Field name="address" label="Address" required wide />
-          <Field name="city" label="City" />
-          <Field name="province" label="Province" />
-          <Field name="country" label="Country" />
-          <Field name="destination_country" label="Destination country" />
-          <Field name="visa_category" label="Visa category" />
-          <Field name="passport_no" label="Passport no" />
-          <Field name="passport_issue" label="Passport issue" type="date" />
-          <Field name="passport_expiry" label="Passport expiry" type="date" />
-          <Field name="documents" label="Documents" />
+          <Field name="ref_id" label="Reference ID" defaultValue={appointment?.ref_id} />
+          <Field name="firstname" label="First name" defaultValue={appointment?.firstname} required />
+          <Field name="lastname" label="Last name" defaultValue={appointment?.lastname} required />
+          <Field name="email" label="Email" type="email" defaultValue={appointment?.email} />
+          <Field name="phone" label="Phone" defaultValue={appointment?.phone} required />
+          <Field name="phone2" label="Second phone" defaultValue={appointment?.phone2} />
+          <Field name="cnic" label="CNIC" defaultValue={appointment?.cnic} />
+          <Select name="gender" label="Gender" options={["Male", "Female", "Other"]} defaultValue={appointment?.gender || "Male"} />
+          <Field name="address" label="Address" defaultValue={appointment?.address} required wide />
+          <Field name="city" label="City" defaultValue={appointment?.city} />
+          <Field name="province" label="Province" defaultValue={appointment?.province} />
+          <Field name="country" label="Country" defaultValue={appointment?.country} />
+          <Field name="destination_country" label="Destination country" defaultValue={appointment?.destination_country} />
+          <Field name="visa_category" label="Visa category" defaultValue={appointment?.visa_category} />
+          <Field name="passport_no" label="Passport no" defaultValue={appointment?.passport_no} />
+          <Field name="passport_issue" label="Passport issue" type="date" defaultValue={dateInput(appointment?.passport_issue)} />
+          <Field name="passport_expiry" label="Passport expiry" type="date" defaultValue={dateInput(appointment?.passport_expiry)} />
+          <Field name="documents" label="Documents" defaultValue={appointment?.documents} />
         </div>
       </section>
 
@@ -172,7 +189,7 @@ export default async function NewCasePage() {
         <h2>Case</h2>
         <div className="formGrid">
           <EmployeeSelect employees={employees} />
-          <Field name="caseCategory" label="Case category" required />
+          <Field name="caseCategory" label="Case category" defaultValue={appointment?.visa_category || "Consultation"} required />
           <Select name="status" label="Status" options={["Open", "In Process", "Pending", "Completed", "Closed"]} />
           <Field name="startDate" label="Start date" type="date" defaultValue={today()} required />
           <Field name="endDate" label="End date" type="date" />
@@ -181,8 +198,10 @@ export default async function NewCasePage() {
           <Field name="docs" label="Docs status" />
           <Field name="total" label="Total amount" type="number" required />
           <Field name="initial_payment" label="Initial payment" type="number" defaultValue="0" />
-          <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue="0" />
-          <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={localDateTime()} required />
+          <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={appointment?.fee ?? "0"} />
+          <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue={appointment?.appointmentstatus || "Unpaid"} />
+          <Select name="appointment_category" label="Appointment type" options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} defaultValue={appointment?.category || "visit"} />
+          <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(appointment?.appointmentdate) || localDateTime()} required />
           <Field name="documents_note" label="Document notes" wide />
           <Textarea name="description" label="Case description" />
         </div>
@@ -206,16 +225,86 @@ export default async function NewCasePage() {
   </>;
 }
 
-function Field({ name, label, type = "text", required, wide, defaultValue }: { name: string; label: string; type?: string; required?: boolean; wide?: boolean; defaultValue?: string }) {
-  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input className="input" name={name} type={type} required={required} defaultValue={defaultValue} /></div>;
+async function getAppointmentIntake(appointmentId: number) {
+  const result = await getDb().query(
+    `
+      SELECT
+        a.id,
+        a.client_id,
+        a.fee,
+        a.appointmentstatus,
+        a.category,
+        a.appointmentdate,
+        c.ref_id,
+        c.firstname,
+        c.lastname,
+        c.email,
+        c.phone,
+        c.phone2,
+        c.cnic,
+        c.gender,
+        c.address,
+        c.city,
+        c.province,
+        c.country,
+        c.destination_country,
+        c.visa_category,
+        c.passport_no,
+        c.passport_issue,
+        c.passport_expiry,
+        c.documents,
+        cc.id AS case_id
+      FROM "appointments" a
+      JOIN "clients" c ON c.id = a.client_id
+      LEFT JOIN "client_cases" cc ON cc.appointment_id = a.id
+      WHERE a.id = $1
+      LIMIT 1
+    `,
+    [appointmentId],
+  );
+  return result.rows[0] ?? null;
+}
+
+function clientValues(formData: FormData, now: Date, existingClientId?: number) {
+  const values = [
+    nullableText(formData, "ref_id"),
+    text(formData, "firstname"),
+    text(formData, "lastname"),
+    nullableText(formData, "email"),
+    text(formData, "phone"),
+    nullableText(formData, "phone2"),
+    nullableText(formData, "cnic"),
+    text(formData, "gender", "Male"),
+    text(formData, "avatar", "user.jpg"),
+    nullableText(formData, "city"),
+    nullableText(formData, "province"),
+    nullableText(formData, "country"),
+    text(formData, "address", "Not provided"),
+    nullableText(formData, "destination_country"),
+    nullableText(formData, "visa_category"),
+    nullableText(formData, "passport_no"),
+    nullableText(formData, "passport_issue"),
+    nullableText(formData, "passport_expiry"),
+    nullableText(formData, "documents"),
+    now,
+  ];
+  return existingClientId ? [...values, existingClientId] : values;
+}
+
+function Field({ name, label, type = "text", required, wide, defaultValue }: { name: string; label: string; type?: string; required?: boolean; wide?: boolean; defaultValue?: unknown }) {
+  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input className="input" name={name} type={type} required={required} defaultValue={inputValue(defaultValue)} step={type === "number" ? "0.01" : undefined} /></div>;
 }
 
 function Textarea({ name, label }: { name: string; label: string }) {
   return <div style={{gridColumn:"1 / -1"}}><label className="label">{label}</label><textarea className="input" name={name} rows={4} /></div>;
 }
 
-function Select({ name, label, options }: { name: string; label: string; options: string[] }) {
-  return <div><label className="label">{label}</label><select className="input" name={name}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></div>;
+function Select({ name, label, options, defaultValue }: { name: string; label: string; options: Array<string | { value: string; label: string }>; defaultValue?: unknown }) {
+  return <div><label className="label">{label}</label><select className="input" name={name} defaultValue={inputValue(defaultValue)}>{options.map((option) => {
+    const value = typeof option === "string" ? option : option.value;
+    const label = typeof option === "string" ? option : option.label;
+    return <option key={value} value={value}>{label}</option>;
+  })}</select></div>;
 }
 
 function EmployeeSelect({ employees }: { employees: Awaited<ReturnType<typeof employeeOptions>> }) {
@@ -224,4 +313,22 @@ function EmployeeSelect({ employees }: { employees: Awaited<ReturnType<typeof em
 
 function AccessDenied() {
   return <div className="panel"><h1>New Case</h1><p className="muted">You do not have permission to create cases.</p></div>;
+}
+
+function inputValue(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value);
+}
+
+function dateInput(value: unknown) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
+function dateTimeInput(value: unknown) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 16);
+  return String(value).replace(" ", "T").slice(0, 16);
 }

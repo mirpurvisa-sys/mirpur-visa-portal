@@ -149,7 +149,8 @@ function chooseDisplayColumns(table, csvColumnList) {
   const actualColumns = new Set(table.columns.map((column) => column.name));
   const columns = (csvColumnList?.length ? csvColumnList : table.columns.map((column) => column.name))
     .filter((column) => actualColumns.has(column));
-  return columns.length ? columns : table.columns.map((column) => column.name);
+  const missingColumns = table.columns.map((column) => column.name).filter((column) => !columns.includes(column));
+  return columns.length ? [...columns, ...missingColumns] : table.columns.map((column) => column.name);
 }
 
 function chooseSearchFields(table, primaryKey) {

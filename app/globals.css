@@ -45,6 +45,9 @@ input, select, textarea { outline: none; }
 .statusPill { display:inline-flex; align-items:center; border-radius:999px; padding:5px 10px; background:#ecfdf5; color:#047857; font-size:12px; font-weight:900; white-space:nowrap; }
 .dangerPill { background:#fef2f2; color:#b91c1c; }
 .dangerPanel { border-color:#fecaca; background:#fff1f2; color:#991b1b; }
+.notice { border-radius:8px; padding:13px 16px; font-size:14px; font-weight:800; margin-bottom:18px; }
+.errorNotice { border:1px solid #fecaca; background:#fff1f2; color:#991b1b; }
+.successNotice { border:1px solid #bbf7d0; background:#f0fdf4; color:#166534; }
 .dangerButton { color:#b91c1c; border-color:#fecaca; background:#fff7f7; }
 .iconDanger { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:8px; border:1px solid #fecaca; color:#b91c1c; background:#fff7f7; }
 .emptyState { padding:22px; color:#64748b; text-align:center; }
@@ -58,9 +61,12 @@ input, select, textarea { outline: none; }
 .employeeStats strong { display:block; color:#0f172a; margin-top:4px; }
 .editDrawer { border-top:1px solid #eef2f7; padding-top:10px; }
 .editDrawer summary { cursor:pointer; font-weight:800; color:#0b3954; }
+.passwordReset summary { color:#7c2d12; }
 .compactForm { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:12px; }
 .appointmentList { display:grid; gap:12px; }
 .appointmentItem { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,.8fr) minmax(120px,.5fr) auto; gap:14px; align-items:center; }
+.statusForm { display:flex; align-items:center; gap:8px; }
+.statusForm .input { min-width:150px; padding:9px 10px; }
 @media (max-width: 760px) {
   .erpHeader, .appointmentItem { display:grid; }
   .filterBar, .inlineForm { grid-template-columns:1fr; }
