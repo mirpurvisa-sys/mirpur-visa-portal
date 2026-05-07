@@ -4,7 +4,7 @@ import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData, parseRecordWhere } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
-import { canDeleteResource, canEditResource, requireResourceAccess } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,7 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
   if(!requireResourceAccess(user, resource) || !canEditResource(user, resource)) {
     return <AccessDenied title={resource.title} message="You do not have permission to edit records in this module." />;
   }
+  const visibleResource = visibleResourceForUser(user, resource);
   const userCanDelete = canDeleteResource(user, resource);
   const where = parseRecordWhere(resource, id);
   const row = await delegate(resource.model).findUnique({ where });
@@ -25,7 +26,8 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canEditResource(currentUser, res)) throw new Error("You do not have permission to edit this record.");
-    const data = await formToData(res, formData, "edit"); delete data.created_at;
+    const visibleRes = visibleResourceForUser(currentUser, res);
+    const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "edit"), "edit"); delete data.created_at;
     await delegate(res.model).update({ where: parseRecordWhere(res, id), data });
     redirect(`/admin/${res.key}`);
   }
@@ -37,7 +39,7 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
     redirect(`/admin/${res.key}`);
   }
-  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h1 style={{fontSize:30,fontWeight:900}}>Edit {resource.title}</h1>{userCanDelete ? <form action={deleteAction}><button className="btn" style={{color:"#dc2626"}}>Delete</button></form> : null}</div><ResourceForm resource={resource} row={row} action={updateAction} button="Save Changes" /></>;
+  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h1 style={{fontSize:30,fontWeight:900}}>Edit {resource.title}</h1>{userCanDelete ? <form action={deleteAction}><button className="btn" style={{color:"#dc2626"}}>Delete</button></form> : null}</div><ResourceForm resource={visibleResource} row={row} action={updateAction} button="Save Changes" /></>;
 }
 
 function AccessDenied({ title, message }: { title: string; message: string }) {

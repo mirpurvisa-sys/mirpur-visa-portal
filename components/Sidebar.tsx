@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { BriefcaseBusiness, CalendarClock, Database, LayoutDashboard, UsersRound, WalletCards } from "lucide-react";
 import type { CurrentUser } from "@/lib/auth";
-import { allowedResources, canViewResource } from "@/lib/permissions";
+import { allowedResources, canViewFinance, canViewResource } from "@/lib/permissions";
 
 export function Sidebar({ user }: { user: CurrentUser }){
   const visibleResources = allowedResources(user);
   const workflowModules = [
     { href: "/admin/cases", label: "Cases", icon: <BriefcaseBusiness size={18}/>, show: canViewResource(user, "cases") || canViewResource(user, "clients") },
     { href: "/admin/appointments", label: "Appointments", icon: <CalendarClock size={18}/>, show: canViewResource(user, "appointments") },
-    { href: "/admin/payments", label: "Payments", icon: <WalletCards size={18}/>, show: canViewResource(user, "incomes") || canViewResource(user, "expenses") || canViewResource(user, "case-installments") },
+    { href: "/admin/payments", label: "Payments", icon: <WalletCards size={18}/>, show: canViewFinance(user) },
     { href: "/admin/employees", label: "Employees", icon: <UsersRound size={18}/>, show: canViewResource(user, "employees") },
   ].filter((item) => item.show);
   const workflowResourceKeys = new Set(["cases", "appointments", "employees", "incomes", "expenses", "case-installments"]);

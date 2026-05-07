@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getResource } from "@/lib/adminConfig";
 import { buildWhere, delegate, formatCellValue, recordKey } from "@/lib/crud";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, canEditResource, canSearch, requireResourceAccess } from "@/lib/permissions";
+import { canCreateResource, canEditResource, canSearch, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,7 @@ export default async function ResourcePage({ params, searchParams }: { params: P
   const resource = getResource(key);
   if(!resource) notFound();
   if(!requireResourceAccess(user, resource)) return <AccessDenied title={resource.title} message="You do not have permission to access this module." />;
+  const visibleResource = visibleResourceForUser(user, resource);
 
   const userCanSearch = canSearch(user);
   const userCanCreate = canCreateResource(user, resource);
@@ -22,7 +23,7 @@ export default async function ResourcePage({ params, searchParams }: { params: P
   let rows:any[] = [];
   let count = 0;
   try {
-    const where = buildWhere(resource, q);
+    const where = buildWhere(visibleResource, q);
     count = await delegate(resource.model).count({ where });
     rows = await delegate(resource.model).findMany({ where, take: 50, orderBy: { [resource.primaryKey[0] || "id"]: "desc" } });
   } catch(e:any) {
@@ -36,10 +37,10 @@ export default async function ResourcePage({ params, searchParams }: { params: P
     {userCanSearch ? <div className="card" style={{padding:16,marginBottom:16}}>
       <form style={{display:"flex",gap:10}}><input className="input" name="q" defaultValue={q} placeholder={`Search ${resource.title}...`} /><button className="btn">Search</button></form>
     </div> : null}
-    <div className="card tableWrap"><table className="table dataTable"><thead><tr>{resource.columns.map(c => <th key={c}>{c}</th>)}<th className="actionColumn">Action</th></tr></thead><tbody>
+    <div className="card tableWrap"><table className="table dataTable"><thead><tr>{visibleResource.columns.map(c => <th key={c}>{c}</th>)}<th className="actionColumn">Action</th></tr></thead><tbody>
       {rows.map((row:any) => {
         const key = recordKey(resource, row);
-        return <tr key={key}>{resource.columns.map(c => <td key={c}>{formatCellValue(c, row[c])}</td>)}<td className="actionColumn">{userCanEdit ? <Link className="btn" href={`/admin/${resource.key}/${key}/edit`}>Edit</Link> : <span style={{color:"#94a3b8"}}>View only</span>}</td></tr>;
+        return <tr key={key}>{visibleResource.columns.map(c => <td key={c}>{formatCellValue(c, row[c])}</td>)}<td className="actionColumn">{userCanEdit ? <Link className="btn" href={`/admin/${resource.key}/${key}/edit`}>Edit</Link> : <span style={{color:"#94a3b8"}}>View only</span>}</td></tr>;
       })}
     </tbody></table></div>
   </>;

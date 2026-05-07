@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { resources } from "@/lib/adminConfig";
 import { delegate } from "@/lib/crud";
 import { requireUser } from "@/lib/auth";
-import { allowedResources, canViewResource } from "@/lib/permissions";
+import { allowedResources, canViewFinance, canViewResource } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +10,11 @@ async function safeCount(model:string){ try { return await delegate(model).count
 export default async function AdminDashboard(){
   const user = await requireUser();
   const visibleResources = allowedResources(user);
+  const showFinance = canViewFinance(user);
   const workflows = [
-    { title: "Cases", href: "/admin/cases", description: "Clients, cases, assignments, installments", show: canViewResource(user, "cases") || canViewResource(user, "clients") },
+    { title: "Cases", href: "/admin/cases", description: showFinance ? "Clients, cases, assignments, installments" : "Clients, cases, and assignments", show: canViewResource(user, "cases") || canViewResource(user, "clients") },
     { title: "Appointments", href: "/admin/appointments", description: "Consultations and linked case schedules", show: canViewResource(user, "appointments") },
-    { title: "Payments", href: "/admin/payments", description: "Income, expenses, and installments", show: canViewResource(user, "incomes") || canViewResource(user, "expenses") || canViewResource(user, "case-installments") },
+    { title: "Payments", href: "/admin/payments", description: "Income, expenses, and installments", show: showFinance },
     { title: "Employees", href: "/admin/employees", description: "Team profiles and case workload", show: canViewResource(user, "employees") },
   ].filter((item) => item.show);
   const counts = await Promise.all(visibleResources.slice(0,12).map(async r => ({...r, count: await safeCount(r.model)})));

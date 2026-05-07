@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BriefcaseBusiness, Plus, WalletCards } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
@@ -14,6 +14,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
 
   const casesResource = getResource("cases");
   const canCreate = casesResource ? canCreateResource(user, casesResource) : false;
+  const showFinance = canViewFinance(user);
   const params = await searchParams;
   const q = (params.q || "").trim();
   const status = (params.status || "").trim();
@@ -31,7 +32,18 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   }
 
   const whereSql = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
-  const stats = await getCaseStats();
+  const stats = showFinance ? await getCaseStats() : await getCaseCountStats();
+  const financeSelect = showFinance
+    ? `
+        cc.total,
+        cc.advance,
+        cc.total_paid,
+        cc.remaining,
+        COUNT(ci.id)::int AS installment_count,
+        COALESCE(SUM(NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric), 0) AS installment_total
+      `
+    : `0::int AS installment_count`;
+  const financeJoin = showFinance ? `LEFT JOIN "case_installments" ci ON ci.client_case_id = cc.id` : "";
   const result = await getDb().query(
     `
       SELECT
@@ -39,22 +51,17 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         cc.client_name,
         cc."caseCategory",
         cc.status,
-        cc.total,
-        cc.advance,
-        cc.total_paid,
-        cc.remaining,
         cc."startDate",
         c.firstname,
         c.lastname,
         c.phone,
         e.firstname AS employee_firstname,
         e.lastname AS employee_lastname,
-        COUNT(ci.id)::int AS installment_count,
-        COALESCE(SUM(NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric), 0) AS installment_total
+        ${financeSelect}
       FROM "client_cases" cc
       JOIN "clients" c ON c.id = cc.client_id
       LEFT JOIN "employees" e ON e.id = cc.employee_id
-      LEFT JOIN "case_installments" ci ON ci.client_case_id = cc.id
+      ${financeJoin}
       ${whereSql}
       GROUP BY cc.id, c.id, e.id
       ORDER BY cc.id DESC
@@ -68,16 +75,18 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
       <div>
         <div className="eyebrow">Case operations</div>
         <h1>Cases</h1>
-        <p>Manage clients, assigned employees, case progress, and custom installments from one workspace.</p>
+        <p>{showFinance ? "Manage clients, assigned employees, case progress, and custom installments from one workspace." : "Manage clients, assigned employees, and case progress from one workspace."}</p>
       </div>
       {canCreate ? <Link className="btn btnPrimary" href="/admin/cases/new"><Plus size={18}/> New Case</Link> : null}
     </div>
 
     <div className="metricGrid">
       <Metric label="Active cases" value={stats.total.toLocaleString()} icon={<BriefcaseBusiness size={20}/>} />
-      <Metric label="Case value" value={money(stats.totalValue)} />
-      <Metric label="Received" value={money(stats.paid)} icon={<WalletCards size={20}/>} />
-      <Metric label="Outstanding" value={money(stats.remaining)} tone="warn" />
+      {showFinance ? <>
+        <Metric label="Case value" value={money(stats.totalValue)} />
+        <Metric label="Received" value={money(stats.paid)} icon={<WalletCards size={20}/>} />
+        <Metric label="Outstanding" value={money(stats.remaining)} tone="warn" />
+      </> : null}
     </div>
 
     <div className="panel">
@@ -97,7 +106,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
 
     <div className="panel tableWrap">
       <table className="table dataTable">
-        <thead><tr><th>Case</th><th>Client</th><th>Assigned To</th><th>Status</th><th>Total</th><th>Paid</th><th>Remaining</th><th>Installments</th><th className="actionColumn">Action</th></tr></thead>
+        <thead><tr><th>Case</th><th>Client</th><th>Assigned To</th><th>Status</th>{showFinance ? <><th>Total</th><th>Paid</th><th>Remaining</th><th>Installments</th></> : null}<th className="actionColumn">Action</th></tr></thead>
         <tbody>
           {result.rows.map((row) => (
             <tr key={row.id}>
@@ -105,10 +114,12 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
               <td><strong>{row.client_name || `${row.firstname} ${row.lastname}`}</strong><div className="muted">{row.phone}</div></td>
               <td>{[row.employee_firstname, row.employee_lastname].filter(Boolean).join(" ") || "-"}</td>
               <td><span className="statusPill">{row.status || "Open"}</span></td>
-              <td>{money(row.total)}</td>
-              <td>{money(row.total_paid ?? row.installment_total)}</td>
-              <td>{money(row.remaining)}</td>
-              <td>{row.installment_count}</td>
+              {showFinance ? <>
+                <td>{money(row.total)}</td>
+                <td>{money(row.total_paid ?? row.installment_total)}</td>
+                <td>{money(row.remaining)}</td>
+                <td>{row.installment_count}</td>
+              </> : null}
               <td className="actionColumn"><Link className="btn" href={`/admin/cases/${row.id}`}>Open</Link></td>
             </tr>
           ))}
@@ -135,6 +146,11 @@ async function getCaseStats() {
     paid: Number(row.paid || 0),
     remaining: Number(row.remaining || 0),
   };
+}
+
+async function getCaseCountStats() {
+  const result = await getDb().query(`SELECT COUNT(*)::int AS total FROM "client_cases"`);
+  return { total: Number(result.rows[0]?.total || 0), totalValue: 0, paid: 0, remaining: 0 };
 }
 
 function Metric({ label, value, icon, tone }: { label: string; value: string; icon?: React.ReactNode; tone?: "warn" }) {

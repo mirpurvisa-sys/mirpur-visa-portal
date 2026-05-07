@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CalendarClock, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, canDeleteResource, canEditResource, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { dateTimeValue, localDateTime, money, nullableText, numberValue, text } from "@/lib/erp";
@@ -19,15 +19,17 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const canDelete = canDeleteResource(user, resource);
   const casesResource = getResource("cases");
   const canStartCase = casesResource ? canCreateResource(user, casesResource) : false;
+  const showFinance = canViewFinance(user);
   const params = await searchParams;
-  const paymentStatus = (params.status || "").trim();
-  const [appointments, stats] = await Promise.all([getAppointments(paymentStatus), getStats()]);
+  const paymentStatus = showFinance ? (params.status || "").trim() : "";
+  const [appointments, stats] = await Promise.all([getAppointments(paymentStatus), showFinance ? getPaymentStats() : getSchedulingStats()]);
 
   async function createAppointment(formData: FormData) {
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("appointments");
     if (!currentResource || !canCreateResource(currentUser, currentResource)) throw new Error("You do not have permission to create appointments.");
+    const currentCanViewFinance = canViewFinance(currentUser);
     const db = getDb();
     const now = new Date();
     const client = await db.query(
@@ -66,7 +68,13 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
     await getDb().query(
       `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW())`,
-      [Number(client.rows[0].id), numberValue(formData, "fee"), text(formData, "appointmentstatus", "Unpaid"), text(formData, "category", "visit"), dateTimeValue(formData, "appointmentdate")],
+      [
+        Number(client.rows[0].id),
+        currentCanViewFinance ? numberValue(formData, "fee") : 0,
+        currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
+        text(formData, "category", "visit"),
+        dateTimeValue(formData, "appointmentdate"),
+      ],
     );
     redirect("/admin/appointments");
   }
@@ -76,6 +84,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const currentUser = await requireUser();
     const currentResource = getResource("appointments");
     if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to update appointment status.");
+    if (!canViewFinance(currentUser)) throw new Error("Only admins can update appointment payment status.");
     await getDb().query(`UPDATE "appointments" SET appointmentstatus=$1, updated_at=NOW() WHERE id=$2`, [text(formData, "appointmentstatus"), numberValue(formData, "id")]);
     redirect("/admin/appointments");
   }
@@ -85,9 +94,20 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const currentUser = await requireUser();
     const currentResource = getResource("appointments");
     if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to update appointments.");
-    await getDb().query(
+    const db = getDb();
+    const appointmentId = numberValue(formData, "id");
+    const currentCanViewFinance = canViewFinance(currentUser);
+    const existing = currentCanViewFinance ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
+    const existingRow = existing?.rows[0] || {};
+    await db.query(
       `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW() WHERE id=$5`,
-      [numberValue(formData, "fee"), text(formData, "appointmentstatus"), text(formData, "category"), dateTimeValue(formData, "appointmentdate"), numberValue(formData, "id")],
+      [
+        currentCanViewFinance ? numberValue(formData, "fee") : Number(existingRow.fee || 0),
+        currentCanViewFinance ? text(formData, "appointmentstatus") : textFromValue(existingRow.appointmentstatus, "Unpaid"),
+        text(formData, "category"),
+        dateTimeValue(formData, "appointmentdate"),
+        appointmentId,
+      ],
     );
     redirect("/admin/appointments");
   }
@@ -115,12 +135,14 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
     <div className="metricGrid">
       <Metric label="Total" value={stats.total.toLocaleString()} icon={<CalendarClock size={20}/>} />
-      <Metric label="Paid" value={stats.paid.toLocaleString()} />
-      <Metric label="Unpaid" value={stats.unpaid.toLocaleString()} />
-      <Metric label="Fees" value={money(stats.fees)} />
+      {showFinance ? <>
+        <Metric label="Paid" value={stats.paid.toLocaleString()} />
+        <Metric label="Unpaid" value={stats.unpaid.toLocaleString()} />
+        <Metric label="Fees" value={money(stats.fees)} />
+      </> : null}
     </div>
 
-    <div className="panel">
+    {showFinance ? <div className="panel">
       <form className="filterBar">
         <select className="input" name="status" defaultValue={paymentStatus}>
           <option value="">All payment statuses</option>
@@ -129,7 +151,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         </select>
         <button className="btn">Filter</button>
       </form>
-    </div>
+    </div> : null}
 
     {canCreate ? <form action={createAppointment} className="panel formSection">
       <div className="sectionHeader"><h2>Book Appointment</h2><span className="badge">Creates client + appointment</span></div>
@@ -156,8 +178,10 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       </div>
       <h3 className="formSubhead">Appointment Details</h3>
       <div className="formGrid">
-        <Field name="fee" label="Fee" type="number" defaultValue="0" required />
-        <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
+        {showFinance ? <>
+          <Field name="fee" label="Fee" type="number" defaultValue="0" required />
+          <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
+        </> : null}
         <Select name="category" label="Appointment type" options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} defaultValue="visit" />
         <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={localDateTime()} required />
       </div>
@@ -165,19 +189,19 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     </form> : null}
 
     <div className="appointmentList">
-      {appointments.map((item) => <article className="panel appointmentItem" key={item.id}>
+      {appointments.map((item) => <article className={`panel appointmentItem ${showFinance ? "" : "appointmentItemCompact"}`} key={item.id}>
         <div>
           <strong>{item.firstname} {item.lastname}</strong>
           <p className="muted">{item.phone} - {appointmentTypeLabel(item.category)}</p>
         </div>
-        <div>{canEdit ? <form action={changeAppointmentStatus} className="statusForm">
+        <div>{showFinance ? (canEdit ? <form action={changeAppointmentStatus} className="statusForm">
           <input type="hidden" name="id" value={item.id} />
           <select className="input" name="appointmentstatus" defaultValue={item.appointmentstatus}>
             {["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
           <button className="btn">Save</button>
-        </form> : <span className="statusPill">{item.appointmentstatus}</span>}<p className="muted">{formatDateTime(item.appointmentdate)}</p></div>
-        <div><strong>{money(item.fee)}</strong><p className="muted">Fee</p></div>
+        </form> : <span className="statusPill">{item.appointmentstatus}</span>) : null}<p className="muted">{formatDateTime(item.appointmentdate)}</p></div>
+        {showFinance ? <div><strong>{money(item.fee)}</strong><p className="muted">Fee</p></div> : null}
         <div className="headerActions">
           {item.case_id ? <Link className="btn" href={`/admin/cases/${item.case_id}`}>Open Case</Link> : null}
           {!item.case_id && canStartCase ? <Link className="btn btnPrimary" href={`/admin/cases/new?appointment_id=${item.id}`}>Start Case</Link> : null}
@@ -187,8 +211,10 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           <summary>Edit appointment</summary>
           <form action={updateAppointment} className="inlineForm">
             <input type="hidden" name="id" value={item.id} />
-            <input className="input" name="fee" type="number" step="0.01" defaultValue={item.fee} required />
-            <select className="input" name="appointmentstatus" defaultValue={item.appointmentstatus}>{["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}</select>
+            {showFinance ? <>
+              <input className="input" name="fee" type="number" step="0.01" defaultValue={item.fee} required />
+              <select className="input" name="appointmentstatus" defaultValue={item.appointmentstatus}>{["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}</select>
+            </> : null}
             <select className="input" name="category" defaultValue={item.category}>{appointmentTypeOptions().map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
             <input className="input" name="appointmentdate" type="datetime-local" defaultValue={formatDateTime(item.appointmentdate)} required />
             <button className="btn btnPrimary">Save</button>
@@ -218,7 +244,7 @@ async function getAppointments(paymentStatus: string) {
   return result.rows;
 }
 
-async function getStats() {
+async function getPaymentStats() {
   const result = await getDb().query(`
     SELECT
       COUNT(*)::int AS total,
@@ -229,6 +255,11 @@ async function getStats() {
   `);
   const row = result.rows[0] || {};
   return { total: Number(row.total || 0), paid: Number(row.paid || 0), unpaid: Number(row.unpaid || 0), fees: Number(row.fees || 0) };
+}
+
+async function getSchedulingStats() {
+  const result = await getDb().query(`SELECT COUNT(*)::int AS total FROM "appointments"`);
+  return { total: Number(result.rows[0]?.total || 0), paid: 0, unpaid: 0, fees: 0 };
 }
 
 function Metric({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
@@ -266,4 +297,9 @@ function appointmentTypeLabel(value: unknown) {
   if (normalized === "online") return "Online";
   if (normalized === "visit" || normalized === "physical") return "Physical / Visit";
   return String(value || "-");
+}
+
+function textFromValue(value: unknown, fallback: string) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
 }

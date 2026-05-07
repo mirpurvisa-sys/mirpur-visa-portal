@@ -65,6 +65,7 @@ input, select, textarea { outline: none; }
 .compactForm { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; margin-top:12px; }
 .appointmentList { display:grid; gap:12px; }
 .appointmentItem { display:grid; grid-template-columns:minmax(220px,1.2fr) minmax(180px,.8fr) minmax(120px,.5fr) auto; gap:14px; align-items:center; }
+.appointmentItemCompact { grid-template-columns:minmax(220px,1.2fr) minmax(180px,.8fr) auto; }
 .statusForm { display:flex; align-items:center; gap:8px; }
 .statusForm .input { min-width:150px; padding:9px 10px; }
 @media (max-width: 760px) {

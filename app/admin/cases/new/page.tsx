@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { canCreateResource, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text, today } from "@/lib/erp";
 
@@ -12,6 +12,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
   const user = await requireUser();
   const resource = getResource("cases");
   if (!canViewResource(user, "cases") || !resource || !canCreateResource(user, resource)) return <AccessDenied />;
+  const showFinance = canViewFinance(user);
 
   const params = await searchParams;
   const appointmentId = Number(params.appointment_id || 0);
@@ -26,11 +27,12 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
     if (!currentResource || !canCreateResource(currentUser, currentResource)) throw new Error("You do not have permission to create cases.");
+    const currentCanViewFinance = canViewFinance(currentUser);
 
     const db = getDb();
     const now = new Date();
-    const total = numberValue(formData, "total");
-    const initialPayment = numberValue(formData, "initial_payment");
+    const total = currentCanViewFinance ? numberValue(formData, "total") : 0;
+    const initialPayment = currentCanViewFinance ? numberValue(formData, "initial_payment") : 0;
     const clientName = `${text(formData, "firstname")} ${text(formData, "lastname")}`.trim();
     const existingClientId = numberValue(formData, "existing_client_id");
     const existingAppointmentId = numberValue(formData, "existing_appointment_id");
@@ -68,9 +70,18 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
     if (appointmentIdForCase > 0) {
       const existingCase = await db.query(`SELECT id FROM "client_cases" WHERE appointment_id=$1 LIMIT 1`, [appointmentIdForCase]);
       if (existingCase.rows[0]?.id) redirect(`/admin/cases/${existingCase.rows[0].id}`);
+      const existingAppointment = await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentIdForCase]);
+      const existingAppointmentRow = existingAppointment.rows[0] || {};
       await db.query(
         `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=$5 WHERE id=$6`,
-        [numberValue(formData, "appointment_fee"), text(formData, "appointmentstatus", "Unpaid"), text(formData, "appointment_category", "visit"), dateTimeValue(formData, "appointmentdate"), now, appointmentIdForCase],
+        [
+          currentCanViewFinance ? numberValue(formData, "appointment_fee") : Number(existingAppointmentRow.fee || 0),
+          currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : textFromValue(existingAppointmentRow.appointmentstatus, "Unpaid"),
+          text(formData, "appointment_category", "visit"),
+          dateTimeValue(formData, "appointmentdate"),
+          now,
+          appointmentIdForCase,
+        ],
       );
     } else {
       const appointment = await db.query(
@@ -81,8 +92,8 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         `,
         [
           clientId,
-          numberValue(formData, "appointment_fee"),
-          text(formData, "appointmentstatus", "Unpaid"),
+          currentCanViewFinance ? numberValue(formData, "appointment_fee") : 0,
+          currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
           text(formData, "appointment_category", "visit"),
           dateTimeValue(formData, "appointmentdate"),
           now,
@@ -149,7 +160,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
       <div>
         <div className="eyebrow">Case intake</div>
         <h1>{appointment ? "Start Case From Appointment" : "New Case"}</h1>
-        <p>{appointment ? "Use the booked appointment and client details to open a full case." : "Create the client profile, appointment, case assignment, and first payment together."}</p>
+        <p>{appointment ? "Use the booked appointment and client details to open a full case." : showFinance ? "Create the client profile, appointment, case assignment, and first payment together." : "Create the client profile, appointment, and case assignment together."}</p>
       </div>
       <Link className="btn" href={appointment ? "/admin/appointments" : "/admin/cases"}>{appointment ? "Back to Appointments" : "Back to Cases"}</Link>
     </div>
@@ -196,10 +207,12 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
           <Field name="submitted_on" label="Submitted on" type="date" />
           <Field name="travel_dates" label="Travel dates" />
           <Field name="docs" label="Docs status" />
-          <Field name="total" label="Total amount" type="number" required />
-          <Field name="initial_payment" label="Initial payment" type="number" defaultValue="0" />
-          <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={appointment?.fee ?? "0"} />
-          <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue={appointment?.appointmentstatus || "Unpaid"} />
+          {showFinance ? <>
+            <Field name="total" label="Total amount" type="number" required />
+            <Field name="initial_payment" label="Initial payment" type="number" defaultValue="0" />
+            <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={appointment?.fee ?? "0"} />
+            <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue={appointment?.appointmentstatus || "Unpaid"} />
+          </> : null}
           <Select name="appointment_category" label="Appointment type" options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} defaultValue={appointment?.category || "visit"} />
           <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(appointment?.appointmentdate) || localDateTime()} required />
           <Field name="documents_note" label="Document notes" wide />
@@ -212,13 +225,13 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         </div>
       </section>
 
-      <section className="panel formSection">
+      {showFinance ? <section className="panel formSection">
         <h2>First Installment</h2>
         <div className="formGrid">
           <Field name="installment_name" label="Installment name" defaultValue="Initial payment" />
           <Field name="installment_time" label="Installment time" type="datetime-local" defaultValue={localDateTime()} />
         </div>
-      </section>
+      </section> : null}
 
       <div className="formActions"><button className="btn btnPrimary" disabled={employees.length === 0}>Create Case</button></div>
     </form>
@@ -319,6 +332,11 @@ function inputValue(value: unknown) {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value);
+}
+
+function textFromValue(value: unknown, fallback: string) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
 }
 
 function dateInput(value: unknown) {

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canDeleteResource, canEditResource, canViewResource } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
@@ -19,10 +19,11 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
   if (!canViewResource(user, "cases")) return <AccessDenied />;
   const canEdit = resource ? canEditResource(user, resource) : false;
   const canDelete = resource ? canDeleteResource(user, resource) : false;
+  const showFinance = canViewFinance(user);
 
   const [caseRow, installments, employees] = await Promise.all([
     getCase(caseId),
-    getInstallments(caseId),
+    showFinance ? getInstallments(caseId) : Promise.resolve([]),
     employeeOptions(),
   ]);
   if (!caseRow) notFound();
@@ -72,8 +73,26 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
     if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to edit this case.");
+    const currentCanViewFinance = canViewFinance(currentUser);
+    const db = getDb();
+    const existing = await db.query(
+      `
+        SELECT cc.appointment_id, cc.total, cc.advance, a.fee AS appointment_fee, a.appointmentstatus
+        FROM "client_cases" cc
+        LEFT JOIN "appointments" a ON a.id = cc.appointment_id
+        WHERE cc.id=$1
+        LIMIT 1
+      `,
+      [caseId],
+    );
+    const existingRow = existing.rows[0] || {};
+    const totalValue = currentCanViewFinance ? numberValue(formData, "total") : Number(existingRow.total || 0);
+    const advanceValue = currentCanViewFinance ? numberValue(formData, "advance") : Number(existingRow.advance || 0);
+    const appointmentFee = currentCanViewFinance ? numberValue(formData, "appointment_fee") : Number(existingRow.appointment_fee || 0);
+    const appointmentStatus = currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : textFromValue(existingRow.appointmentstatus, "Unpaid");
+    const appointmentId = Number(existingRow.appointment_id || 0);
 
-    await getDb().query(
+    await db.query(
       `
         UPDATE "client_cases"
         SET employee_id=$1, client_name=$2, total=$3, advance=$4, "caseCategory"=$5,
@@ -86,8 +105,8 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
       [
         numberValue(formData, "employee_id"),
         text(formData, "client_name"),
-        numberValue(formData, "total"),
-        numberValue(formData, "advance"),
+        totalValue,
+        advanceValue,
         text(formData, "caseCategory"),
         dateValue(formData, "startDate"),
         nullableText(formData, "endDate"),
@@ -109,14 +128,14 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
       ],
     );
 
-    await getDb().query(
+    await db.query(
       `UPDATE "appointments" SET appointmentstatus=$1, category=$2, appointmentdate=$3, fee=$4, updated_at=NOW() WHERE id=$5`,
       [
-        text(formData, "appointmentstatus", "Unpaid"),
+        appointmentStatus,
         text(formData, "appointment_category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
-        numberValue(formData, "appointment_fee"),
-        Number(formData.get("appointment_id")),
+        appointmentFee,
+        appointmentId,
       ],
     );
 
@@ -174,12 +193,16 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
       </div>
     </div>
 
-    <div className="metricGrid">
+    {showFinance ? <div className="metricGrid">
       <Metric label="Total" value={money(total)} />
       <Metric label="Paid" value={money(paid)} />
       <Metric label="Remaining" value={money(caseRow.remaining)} tone="warn" />
       <Metric label="Installments" value={installments.length.toLocaleString()} />
-    </div>
+    </div> : <div className="metricGrid">
+      <Metric label="Status" value={String(caseRow.status || "Open")} />
+      <Metric label="Category" value={String(caseRow.caseCategory || "General")} />
+      <Metric label="Start Date" value={dateInput(caseRow.startDate) || "-"} />
+    </div>}
 
     <div className="workspaceGrid">
       <form action={updateClient} className="panel formSection">
@@ -215,16 +238,18 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
           <EmployeeSelect employees={employees} value={caseRow.employee_id} disabled={!canEdit} />
           <Field name="caseCategory" label="Case category" defaultValue={caseRow.caseCategory} disabled={!canEdit} required />
           <Select name="status" label="Status" value={caseRow.status || "Open"} disabled={!canEdit} options={["Open", "In Process", "Pending", "Completed", "Closed"]} />
-          <Field name="total" label="Total amount" type="number" defaultValue={caseRow.total} disabled={!canEdit} required />
-          <Field name="advance" label="Advance" type="number" defaultValue={caseRow.advance} disabled={!canEdit} required />
+          {showFinance ? <>
+            <Field name="total" label="Total amount" type="number" defaultValue={caseRow.total} disabled={!canEdit} required />
+            <Field name="advance" label="Advance" type="number" defaultValue={caseRow.advance} disabled={!canEdit} required />
+          </> : null}
           <Field name="startDate" label="Start date" type="date" defaultValue={dateInput(caseRow.startDate)} disabled={!canEdit} required />
           <Field name="endDate" label="End date" type="date" defaultValue={dateInput(caseRow.endDate)} disabled={!canEdit} />
           <Field name="submitted_on" label="Submitted on" type="date" defaultValue={dateInput(caseRow.submitted_on)} disabled={!canEdit} />
           <Field name="travel_dates" label="Travel dates" defaultValue={caseRow.travel_dates} disabled={!canEdit} />
           <Field name="docs" label="Docs status" defaultValue={caseRow.docs} disabled={!canEdit} />
-          <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={caseRow.appointment_fee} disabled={!canEdit} />
+          {showFinance ? <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={caseRow.appointment_fee} disabled={!canEdit} /> : null}
           <Select name="appointment_category" label="Appointment type" value={caseRow.appointment_category || "visit"} disabled={!canEdit} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
-          <Select name="appointmentstatus" label="Payment status" value={caseRow.appointmentstatus || "Unpaid"} disabled={!canEdit} options={["Paid", "Unpaid"]} />
+          {showFinance ? <Select name="appointmentstatus" label="Payment status" value={caseRow.appointmentstatus || "Unpaid"} disabled={!canEdit} options={["Paid", "Unpaid"]} /> : null}
           <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(caseRow.appointmentdate)} disabled={!canEdit} required />
           <Field name="documents_note" label="Document notes" defaultValue={caseRow.documents_note} disabled={!canEdit} wide />
           <Textarea name="description" label="Description" defaultValue={caseRow.description} disabled={!canEdit} />
@@ -238,7 +263,7 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
       </form>
     </div>
 
-    <section className="panel formSection">
+    {showFinance ? <section className="panel formSection">
       <div className="sectionHeader"><h2>Installments</h2><span className="badge">{money(paid)} received</span></div>
       {canEdit ? <form action={addInstallment} className="inlineForm">
         <input className="input" name="name" placeholder="Installment name" required />
@@ -258,7 +283,7 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
           </tr>)}</tbody>
         </table>
       </div>
-    </section>
+    </section> : null}
   </>;
 }
 
@@ -318,6 +343,11 @@ function stringValue(value: unknown) {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value);
+}
+
+function textFromValue(value: unknown, fallback: string) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
 }
 
 function dateInput(value: unknown) {

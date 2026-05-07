@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { ArrowDownCircle, ArrowUpCircle, Plus } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, canDeleteResource, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { dateValue, money, nullableText, numberValue, text } from "@/lib/erp";
@@ -10,8 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PaymentsPage() {
   const user = await requireUser();
-  const canView = canViewResource(user, "incomes") || canViewResource(user, "expenses") || canViewResource(user, "case-installments");
-  if (!canView) return <AccessDenied />;
+  if (!canViewFinance(user)) return <AccessDenied />;
 
   const incomeResource = getResource("incomes");
   const expenseResource = getResource("expenses");

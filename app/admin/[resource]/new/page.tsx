@@ -4,7 +4,7 @@ import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
-import { canCreateResource, requireResourceAccess } from "@/lib/permissions";
+import { canCreateResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +16,18 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
   if(!requireResourceAccess(user, resource) || !canCreateResource(user, resource)) {
     return <AccessDenied title={resource.title} message="You do not have permission to create records in this module." />;
   }
+  const visibleResource = visibleResourceForUser(user, resource);
   async function createAction(formData: FormData){
     "use server";
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canCreateResource(currentUser, res)) throw new Error("You do not have permission to create this record.");
-    await delegate(res.model).create({ data: await formToData(res, formData, "create") });
+    const visibleRes = visibleResourceForUser(currentUser, res);
+    const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "create"), "create");
+    await delegate(res.model).create({ data });
     redirect(`/admin/${res.key}`);
   }
-  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><h1 style={{fontSize:30,fontWeight:900}}>Add {resource.title}</h1><ResourceForm resource={resource} action={createAction} button="Create Record" /></>;
+  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><h1 style={{fontSize:30,fontWeight:900}}>Add {resource.title}</h1><ResourceForm resource={visibleResource} action={createAction} button="Create Record" /></>;
 }
 
 function AccessDenied({ title, message }: { title: string; message: string }) {
