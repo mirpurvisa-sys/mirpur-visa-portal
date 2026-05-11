@@ -43,6 +43,10 @@ export function canViewFinance(user: CurrentUser) {
   return isAdmin(user);
 }
 
+export function canManageAppointmentPayments(user: CurrentUser) {
+  return canViewFinance(user) || user.roleSlugs.includes("receptionist");
+}
+
 export function isFinanceFieldName(fieldName: string) {
   const normalized = fieldName.toLowerCase();
   return FINANCE_FIELD_NAMES.has(normalized) || normalized.endsWith("_fee");

@@ -4,7 +4,7 @@ import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
-import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text, today } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +25,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const canDelete = canDeleteResource(user, resource);
   const casesResource = getResource("cases");
   const canStartCase = casesResource ? canCreateResource(user, casesResource) : false;
+  const canEditAppointmentPayments = canManageAppointmentPayments(user);
   const showFinance = canViewFinance(user);
   const params = await searchParams;
   const query = textFromValue(params.q, "");
@@ -44,7 +45,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const currentResource = getResource("appointments");
     if (!currentResource || !canCreateResource(currentUser, currentResource)) throw new Error("You do not have permission to create appointments.");
 
-    const currentCanViewFinance = canViewFinance(currentUser);
+    const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
     const db = getDb();
     const now = new Date();
     const client = await db.query(
@@ -88,8 +89,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6)`,
       [
         Number(client.rows[0].id),
-        currentCanViewFinance ? numberValue(formData, "fee") : 0,
-        currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
+        currentCanEditAppointmentPayments ? numberValue(formData, "fee") : 0,
+        currentCanEditAppointmentPayments ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
         text(formData, "category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
         now,
@@ -107,15 +108,15 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
     const db = getDb();
     const appointmentId = numberValue(formData, "id");
-    const currentCanViewFinance = canViewFinance(currentUser);
-    const existing = currentCanViewFinance ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
+    const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
+    const existing = currentCanEditAppointmentPayments ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
     const existingRow = existing?.rows[0] || {};
 
     await db.query(
       `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW() WHERE id=$5`,
       [
-        currentCanViewFinance ? numberValue(formData, "fee") : Number(existingRow.fee || 0),
-        currentCanViewFinance ? text(formData, "appointmentstatus") : textFromValue(existingRow.appointmentstatus, "Unpaid"),
+        currentCanEditAppointmentPayments ? numberValue(formData, "fee") : Number(existingRow.fee || 0),
+        currentCanEditAppointmentPayments ? text(formData, "appointmentstatus") : textFromValue(existingRow.appointmentstatus, "Unpaid"),
         text(formData, "category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
         appointmentId,
@@ -228,7 +229,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       {canCreate ? <Link className="btn btnPrimary" href="/admin/appointments?new=appointment">New Client &amp; Appointment</Link> : null}
     </div>
 
-    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} showFinance={showFinance} /> : null}
+    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} /> : null}
     {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} /> : null}
 
     <section className="panel tableWrap appointmentPanel">
@@ -243,21 +244,23 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
             <th>Client Name</th>
             <th>Phone</th>
             <th>Appointment Date<br />&amp; Time</th>
-            {showFinance ? <th>Status</th> : null}
+            {canEditAppointmentPayments ? <th>Fee</th> : null}
+            {canEditAppointmentPayments ? <th>Status</th> : null}
             <th>Category</th>
             <th>Actions</th>
             <th>Start Case</th>
           </tr>
         </thead>
         <tbody>
-          {appointments.length === 0 ? <tr><td colSpan={showFinance ? 9 : 8} className="emptyState">No data available in table</td></tr> : appointments.map((item) => (
+          {appointments.length === 0 ? <tr><td colSpan={canEditAppointmentPayments ? 10 : 8} className="emptyState">No data available in table</td></tr> : appointments.map((item) => (
             <tr key={item.id}>
               <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
               <td>{item.id}</td>
               <td>{item.firstname} {item.lastname}</td>
               <td>{item.phone}</td>
               <td>{displayDateTime(item.appointmentdate)}</td>
-              {showFinance ? <td>{appointmentStatusLabel(item.appointmentstatus)}</td> : null}
+              {canEditAppointmentPayments ? <td>{moneyValue(item.fee)}</td> : null}
+              {canEditAppointmentPayments ? <td>{appointmentStatusLabel(item.appointmentstatus)}</td> : null}
               <td>{appointmentTypeLabel(item.category)}</td>
               <td>
                 <div className="actionStack vertical">
@@ -268,9 +271,9 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
                     <summary className="actionBtn edit" aria-label="Edit appointment"><Pencil size={18} /></summary>
                     <form action={updateAppointment} className="rowEditForm">
                       <input type="hidden" name="id" value={item.id} />
-                      {showFinance ? <>
+                      {canEditAppointmentPayments ? <>
                         <label><span className="srOnly">Fee</span><input className="input" name="fee" type="number" step="0.01" defaultValue={item.fee} required /></label>
-                        <label><span className="srOnly">Status</span><select className="input" name="appointmentstatus" defaultValue={item.appointmentstatus}>{["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
+                        <label><span className="srOnly">Status</span><select className="input" name="appointmentstatus" defaultValue={appointmentStatusInputValue(item.appointmentstatus)}>{["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
                       </> : null}
                       <label><span className="srOnly">Category</span><select className="input" name="category" defaultValue={item.category}>{appointmentTypeOptions().map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
                       <label><span className="srOnly">Appointment date</span><input className="input" name="appointmentdate" type="datetime-local" defaultValue={dateTimeInput(item.appointmentdate)} required /></label>
@@ -346,7 +349,7 @@ async function getAppointmentCaseSeed(appointmentId: number) {
   return result.rows[0] ?? null;
 }
 
-function AppointmentModal({ action, showFinance }: { action: (formData: FormData) => Promise<void>; showFinance: boolean }) {
+function AppointmentModal({ action, canEditAppointmentPayments }: { action: (formData: FormData) => Promise<void>; canEditAppointmentPayments: boolean }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal appointmentCreateModal">
       <Link className="modalClose" href="/admin/appointments" aria-label="Close">×</Link>
@@ -378,7 +381,7 @@ function AppointmentModal({ action, showFinance }: { action: (formData: FormData
         <Field name="destination_country" label="Destination Country" />
         <Select name="category" label="Appointment Category" options={appointmentTypeOptions()} defaultValue="visit" />
         <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={localDateTime()} required />
-        {showFinance ? <>
+        {canEditAppointmentPayments ? <>
           <Select name="appointmentstatus" label="Status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
           <Field name="fee" label="Appointment Fee" type="number" defaultValue="0" required />
         </> : null}
@@ -512,6 +515,16 @@ function appointmentStatusLabel(value: unknown) {
   if (normalized === "unpaid") return "Un-Paid";
   if (normalized === "paid") return "Paid";
   return raw;
+}
+
+function appointmentStatusInputValue(value: unknown) {
+  const normalized = textFromValue(value, "Unpaid").toLowerCase().replace(/[-\s]/g, "");
+  return normalized === "paid" ? "Paid" : "Unpaid";
+}
+
+function moneyValue(value: unknown) {
+  const amount = Number(value || 0);
+  return Number.isFinite(amount) ? amount.toFixed(2) : "0.00";
 }
 
 function displayDateTime(value: unknown) {

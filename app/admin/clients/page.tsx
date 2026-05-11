@@ -4,7 +4,7 @@ import { ListPlus, Pencil, Plus, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
-import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, localDateTime, nullableText, numberValue, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const canEdit = canEditResource(user, resource);
   const canDelete = canDeleteResource(user, resource);
   const canAddAppointment = appointmentResource ? canCreateResource(user, appointmentResource) : false;
-  const showFinance = canViewFinance(user);
+  const canEditAppointmentPayments = canManageAppointmentPayments(user);
   const params = await searchParams;
   const query = textFromValue(params.q, "");
   const appointmentClientId = Number(params.appointment_for || 0);
@@ -68,7 +68,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     const currentResource = getResource("appointments");
     if (!currentResource || !canCreateResource(currentUser, currentResource)) throw new Error("You do not have permission to create appointments.");
 
-    const currentCanViewFinance = canViewFinance(currentUser);
+    const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
     const clientId = numberValue(formData, "client_id");
     const client = await getDb().query(`SELECT id FROM "clients" WHERE id=$1 LIMIT 1`, [clientId]);
     if (!client.rows[0]) throw new Error("Client was not found.");
@@ -77,8 +77,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
       `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW())`,
       [
         clientId,
-        currentCanViewFinance ? numberValue(formData, "fee") : 0,
-        currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
+        currentCanEditAppointmentPayments ? numberValue(formData, "fee") : 0,
+        currentCanEditAppointmentPayments ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
         text(formData, "category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
       ],
@@ -122,7 +122,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
 
     {params.error === "linked" ? <div className="notice errorNotice">This client already has appointments or cases, so it was not deleted.</div> : null}
     {canCreate && params.new === "client" ? <ClientModal action={createClient} /> : null}
-    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} showFinance={showFinance} /> : null}
+    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} canEditAppointmentPayments={canEditAppointmentPayments} /> : null}
     {viewedClient ? <ClientViewModal client={viewedClient} /> : null}
 
     <section className="panel tableWrap clientPanel">
@@ -227,11 +227,11 @@ function ClientModal({ action }: { action: (formData: FormData) => Promise<void>
 function AppointmentForClientModal({
   action,
   client,
-  showFinance,
+  canEditAppointmentPayments,
 }: {
   action: (formData: FormData) => Promise<void>;
   client: DbRow;
-  showFinance: boolean;
+  canEditAppointmentPayments: boolean;
 }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal caseStartModal">
@@ -244,7 +244,7 @@ function AppointmentForClientModal({
         <Field name="phone_display" label="Phone Number" defaultValue={client.phone} readOnly />
         <Select name="category" label="Appointment Category" options={appointmentTypeOptions()} defaultValue="visit" />
         <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={localDateTime()} required />
-        {showFinance ? <>
+        {canEditAppointmentPayments ? <>
           <Select name="appointmentstatus" label="Status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
           <Field name="fee" label="Appointment Fee" type="number" defaultValue="0" required />
         </> : null}
