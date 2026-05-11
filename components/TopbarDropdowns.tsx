@@ -20,24 +20,32 @@ export type TopbarNotification = {
   time: string;
 };
 
+type TopbarPayload = {
+  notifications?: TopbarNotification[];
+  profileHref?: string;
+  searchItems?: TopbarSearchItem[];
+};
+
 type DropdownState = "search" | "notifications" | "profile" | null;
 
 const STORAGE_KEY = "mvc_topbar_read_notifications";
 
 export function TopbarDropdowns({
   displayName,
-  notifications,
   profileHref,
-  searchItems,
 }: {
   displayName: string;
-  notifications: TopbarNotification[];
-  profileHref: string;
-  searchItems: TopbarSearchItem[];
+  profileHref?: string;
 }) {
   const [open, setOpen] = useState<DropdownState>(null);
   const [query, setQuery] = useState("");
   const [readIds, setReadIds] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
+  const [profileHrefState, setProfileHrefState] = useState(profileHref || "/admin");
+  const [searchItems, setSearchItems] = useState<TopbarSearchItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -78,6 +86,33 @@ export function TopbarDropdowns({
 
   const unreadCount = notifications.filter((notification) => !readIds.includes(notification.id)).length;
 
+  async function loadTopbarData() {
+    if (loaded || loadingRef.current) return;
+
+    loadingRef.current = true;
+    setLoading(true);
+    try {
+      const response = await fetch("/api/topbar", { credentials: "same-origin" });
+      if (!response.ok) return;
+
+      const payload = (await response.json()) as TopbarPayload;
+      setNotifications(Array.isArray(payload.notifications) ? payload.notifications : []);
+      setSearchItems(Array.isArray(payload.searchItems) ? payload.searchItems : []);
+      if (payload.profileHref) setProfileHrefState(payload.profileHref);
+      setLoaded(true);
+    } catch {
+      // Dropdown data can be retried next time without breaking the main page.
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+    }
+  }
+
+  function openDropdown(next: Exclude<DropdownState, null>) {
+    setOpen(open === next ? null : next);
+    if (open !== next) void loadTopbarData();
+  }
+
   function persistReadIds(ids: string[]) {
     setReadIds(ids);
     try {
@@ -111,8 +146,12 @@ export function TopbarDropdowns({
             onChange={(event) => {
               setQuery(event.target.value);
               setOpen("search");
+              void loadTopbarData();
             }}
-            onFocus={() => setOpen("search")}
+            onFocus={() => {
+              setOpen("search");
+              void loadTopbarData();
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
@@ -130,7 +169,9 @@ export function TopbarDropdowns({
               <span>{filteredSearchItems.length} result{filteredSearchItems.length === 1 ? "" : "s"}</span>
             </div>
             <div className="topDropdownList">
-              {filteredSearchItems.length ? (
+              {loading && !loaded ? (
+                <div className="topDropdownEmpty">Loading search...</div>
+              ) : filteredSearchItems.length ? (
                 filteredSearchItems.map((item) => (
                   <Link
                     className="topDropdownItem"
@@ -159,7 +200,7 @@ export function TopbarDropdowns({
           aria-expanded={open === "notifications"}
           aria-label="Open notifications"
           className={`roundIcon ${open === "notifications" ? "active" : ""}`}
-          onClick={() => setOpen(open === "notifications" ? null : "notifications")}
+          onClick={() => openDropdown("notifications")}
           type="button"
         >
           <Bell size={20} aria-hidden="true" />
@@ -174,7 +215,9 @@ export function TopbarDropdowns({
               </button>
             </div>
             <div className="topDropdownList">
-              {notifications.length ? (
+              {loading && !loaded ? (
+                <div className="topDropdownEmpty">Loading notifications...</div>
+              ) : notifications.length ? (
                 notifications.map((notification) => {
                   const unread = !readIds.includes(notification.id);
                   return (
@@ -210,7 +253,7 @@ export function TopbarDropdowns({
           aria-expanded={open === "profile"}
           aria-label="Open profile menu"
           className={`topAvatar ${open === "profile" ? "active" : ""}`}
-          onClick={() => setOpen(open === "profile" ? null : "profile")}
+          onClick={() => openDropdown("profile")}
           type="button"
         >
           <UserRound size={24} aria-hidden="true" />
@@ -225,7 +268,7 @@ export function TopbarDropdowns({
               <LayoutDashboard size={17} aria-hidden="true" />
               Dashboard
             </Link>
-            <Link className="profileMenuLink" href={profileHref} onClick={() => setOpen(null)}>
+            <Link className="profileMenuLink" href={profileHrefState} onClick={() => setOpen(null)}>
               <UserRound size={17} aria-hidden="true" />
               Profile
             </Link>
