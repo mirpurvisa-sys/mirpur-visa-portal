@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Pencil, Plus } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getResource } from "@/lib/adminConfig";
 import { buildWhere, delegate, formatCellValue, recordKey } from "@/lib/crud";
@@ -27,28 +28,63 @@ export default async function ResourcePage({ params, searchParams }: { params: P
     count = await delegate(resource.model).count({ where });
     rows = await delegate(resource.model).findMany({ where, take: 50, orderBy: { [resource.primaryKey[0] || "id"]: "desc" } });
   } catch(e:any) {
-    return <div className="card" style={{padding:24}}><h1>{resource.title}</h1><p>Database error. Check the Supabase connection in <b>.env</b>.</p><pre>{String(e.message || e)}</pre></div>
+    return <div className="panel"><h1>{resource.title}</h1><p>Database error. Check the Supabase connection in <b>.env</b>.</p><pre>{String(e.message || e)}</pre></div>
   }
   return <>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16,marginBottom:20}}>
-      <div><h1 style={{fontSize:30,fontWeight:900,margin:0}}>{resource.title}</h1><p style={{color:"#64748b"}}>{count.toLocaleString()} records found</p></div>
-      {userCanCreate ? <Link className="btn btnPrimary" href={`/admin/${resource.key}/new`}>+ Add New</Link> : null}
+    <ResourceTabs activeKey={resource.key} />
+    <div className="erpHeader">
+      <div>
+        <div className="eyebrow">Records</div>
+        <h1>{resource.title}</h1>
+        <p>{count.toLocaleString()} records found</p>
+      </div>
+      {userCanCreate ? <Link className="btn btnPrimary" href={`/admin/${resource.key}/new`}><Plus size={16}/> Add New</Link> : null}
     </div>
-    {userCanSearch ? <div className="card" style={{padding:16,marginBottom:16}}>
-      <form style={{display:"flex",gap:10}}><input className="input" name="q" defaultValue={q} placeholder={`Search ${resource.title}...`} /><button className="btn">Search</button></form>
+    {userCanSearch ? <div className="panel">
+      <form className="filterBar"><input className="input" name="q" defaultValue={q} placeholder={`Search ${resource.title}...`} /><button className="btn">Search</button></form>
     </div> : null}
-    <div className="card tableWrap"><table className="table dataTable"><thead><tr>{visibleResource.columns.map(c => <th key={c}>{c}</th>)}<th className="actionColumn">Action</th></tr></thead><tbody>
+    <div className="panel tableWrap"><table className="table dataTable"><thead><tr>{visibleResource.columns.map(c => <th key={c}>{c}</th>)}<th className="actionColumn">Action</th></tr></thead><tbody>
       {rows.map((row:any) => {
         const key = recordKey(resource, row);
-        return <tr key={key}>{visibleResource.columns.map(c => <td key={c}>{formatCellValue(c, row[c])}</td>)}<td className="actionColumn">{userCanEdit ? <Link className="btn" href={`/admin/${resource.key}/${key}/edit`}>Edit</Link> : <span style={{color:"#94a3b8"}}>View only</span>}</td></tr>;
+        return <tr key={key}>{visibleResource.columns.map(c => <td key={c}>{formatCellValue(c, row[c])}</td>)}<td className="actionColumn">{userCanEdit ? <Link className="actionBtn edit" href={`/admin/${resource.key}/${key}/edit`} aria-label={`Edit ${resource.title}`}><Pencil size={18}/></Link> : <span className="muted">View only</span>}</td></tr>;
       })}
     </tbody></table></div>
   </>;
 }
 
+function ResourceTabs({ activeKey }: { activeKey: string }) {
+  const clientKeys = new Set(["clients", "appointments", "cases"]);
+  const financeKeys = new Set(["incomes", "expenses"]);
+  const studentKeys = new Set(["life-skills", "ielts"]);
+
+  if (clientKeys.has(activeKey)) {
+    return <div className="workflowGrid">
+      <Link className={`workflowCard ${activeKey === "clients" ? "active" : ""}`} href="/admin/clients"><strong>Clients</strong><span>Client records</span></Link>
+      <Link className={`workflowCard ${activeKey === "appointments" ? "active" : ""}`} href="/admin/appointments"><strong>Appointments</strong><span>Bookings</span></Link>
+      <Link className={`workflowCard ${activeKey === "cases" ? "active" : ""}`} href="/admin/cases"><strong>Cases</strong><span>Case files</span></Link>
+    </div>;
+  }
+
+  if (financeKeys.has(activeKey)) {
+    return <div className="workflowGrid">
+      <Link className={`workflowCard ${activeKey === "expenses" ? "active" : ""}`} href="/admin/expenses"><strong>Expense</strong><span>Expense records</span></Link>
+      <Link className={`workflowCard ${activeKey === "incomes" ? "active" : ""}`} href="/admin/incomes"><strong>Income</strong><span>Income records</span></Link>
+    </div>;
+  }
+
+  if (studentKeys.has(activeKey)) {
+    return <div className="workflowGrid">
+      <Link className={`workflowCard ${activeKey === "life-skills" ? "active" : ""}`} href="/admin/life-skills"><strong>Life Skills</strong><span>Life skills students</span></Link>
+      <Link className={`workflowCard ${activeKey === "ielts" ? "active" : ""}`} href="/admin/ielts"><strong>IELTS</strong><span>IELTS students</span></Link>
+    </div>;
+  }
+
+  return null;
+}
+
 function AccessDenied({ title, message }: { title: string; message: string }) {
-  return <div className="card" style={{padding:24}}>
-    <h1 style={{fontSize:30,fontWeight:900,marginTop:0}}>{title}</h1>
-    <p style={{color:"#64748b",marginBottom:0}}>{message}</p>
+  return <div className="panel">
+    <h1>{title}</h1>
+    <p className="muted">{message}</p>
   </div>;
 }

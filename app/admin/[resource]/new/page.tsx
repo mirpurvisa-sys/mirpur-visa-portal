@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
@@ -27,12 +28,22 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     await delegate(res.model).create({ data });
     redirect(`/admin/${res.key}`);
   }
-  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><h1 style={{fontSize:30,fontWeight:900}}>Add {resource.title}</h1><ResourceForm resource={visibleResource} action={createAction} button="Create Record" /></>;
+  return <>
+    <div className="erpHeader">
+      <div>
+        <div className="eyebrow">Create</div>
+        <h1>Add {resource.title}</h1>
+        <p>Add a new record using the database fields available to your role.</p>
+      </div>
+      <Link className="btn" href={`/admin/${resource.key}`}><ArrowLeft size={16}/> Back</Link>
+    </div>
+    <ResourceForm resource={visibleResource} action={createAction} button="Create Record" />
+  </>;
 }
 
 function AccessDenied({ title, message }: { title: string; message: string }) {
-  return <div className="card" style={{padding:24}}>
-    <h1 style={{fontSize:30,fontWeight:900,marginTop:0}}>{title}</h1>
-    <p style={{color:"#64748b",marginBottom:0}}>{message}</p>
+  return <div className="panel">
+    <h1>{title}</h1>
+    <p className="muted">{message}</p>
   </div>;
 }

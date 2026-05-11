@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowDownCircle, ArrowUpCircle, Plus } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
@@ -8,16 +9,23 @@ import { dateValue, money, nullableText, numberValue, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentsPage() {
+type FinanceTab = "income" | "expense";
+
+export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const user = await requireUser();
   if (!canViewFinance(user)) return <AccessDenied />;
 
+  const params = await searchParams;
+  const activeTab: FinanceTab = params.tab === "expense" ? "expense" : "income";
   const incomeResource = getResource("incomes");
   const expenseResource = getResource("expenses");
   const canCreateIncome = incomeResource ? canCreateResource(user, incomeResource) : false;
   const canCreateExpense = expenseResource ? canCreateResource(user, expenseResource) : false;
   const canDeleteIncome = incomeResource ? canDeleteResource(user, incomeResource) : false;
   const canDeleteExpense = expenseResource ? canDeleteResource(user, expenseResource) : false;
+  const [stats, transactions] = await Promise.all([getPaymentStats(), getTransactions(activeTab)]);
+  const activeTotal = activeTab === "expense" ? stats.expense : stats.income;
+  const activeCreate = activeTab === "expense" ? canCreateExpense : canCreateIncome;
 
   async function addIncome(formData: FormData) {
     "use server";
@@ -26,9 +34,9 @@ export default async function PaymentsPage() {
     if (!resource || !canCreateResource(currentUser, resource)) throw new Error("You do not have permission to add income.");
     await getDb().query(
       `INSERT INTO "incomes" ("Title", "IncomesType", "Amount", "Description", "Date", foreign_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())`,
-      [text(formData, "Title"), text(formData, "IncomesType", "General"), numberValue(formData, "Amount"), nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
+      [text(formData, "Title"), text(formData, "IncomesType", "Appointment"), numberValue(formData, "Amount"), nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
     );
-    redirect("/admin/payments");
+    redirect("/admin/payments?tab=income");
   }
 
   async function addExpense(formData: FormData) {
@@ -38,90 +46,121 @@ export default async function PaymentsPage() {
     if (!resource || !canCreateResource(currentUser, resource)) throw new Error("You do not have permission to add expenses.");
     await getDb().query(
       `INSERT INTO "expenses" (voucher_no, "Title", "ExpenseType", "Amount", "Description", "Date", created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())`,
-      [nullableText(formData, "voucher_no"), text(formData, "Title"), text(formData, "ExpenseType", "General"), numberValue(formData, "Amount"), text(formData, "Description", "-"), dateValue(formData, "Date")],
+      [nullableText(formData, "voucher_no"), text(formData, "Title"), text(formData, "ExpenseType", "Others"), numberValue(formData, "Amount"), text(formData, "Description", "--"), dateValue(formData, "Date")],
     );
-    redirect("/admin/payments");
+    redirect("/admin/payments?tab=expense");
   }
 
   async function deleteTransaction(formData: FormData) {
     "use server";
     const currentUser = await requireUser();
-    const type = text(formData, "type");
+    const type = text(formData, "type") as FinanceTab;
     const id = numberValue(formData, "id");
     if (type === "income") {
       const resource = getResource("incomes");
       if (!resource || !canDeleteResource(currentUser, resource)) throw new Error("You do not have permission to delete income.");
       await getDb().query(`DELETE FROM "incomes" WHERE id=$1`, [id]);
+      redirect("/admin/payments?tab=income");
     }
     if (type === "expense") {
       const resource = getResource("expenses");
       if (!resource || !canDeleteResource(currentUser, resource)) throw new Error("You do not have permission to delete expenses.");
       await getDb().query(`DELETE FROM "expenses" WHERE id=$1`, [id]);
+      redirect("/admin/payments?tab=expense");
     }
     redirect("/admin/payments");
   }
 
-  const [stats, transactions] = await Promise.all([getPaymentStats(), getTransactions()]);
-  const net = stats.income + stats.installments - stats.expense;
-
   return <>
+    <div className="workflowGrid">
+      <Link className={`workflowCard ${activeTab === "expense" ? "active" : ""}`} href="/admin/payments?tab=expense"><strong>Expense</strong><span>Expense records</span></Link>
+      <Link className={`workflowCard ${activeTab === "income" ? "active" : ""}`} href="/admin/payments?tab=income"><strong>Income</strong><span>Income records</span></Link>
+    </div>
+
     <div className="erpHeader">
       <div>
         <div className="eyebrow">Finance</div>
-        <h1>Payments</h1>
-        <p>Track income, expenses, and case installment collections in one finance workspace.</p>
+        <h1>{activeTab === "expense" ? "Expenses" : "Income"}</h1>
+        <p>{activeTab === "expense" ? "Track operational spending and vouchers." : "Track appointment, service, and case income."}</p>
+      </div>
+      {activeCreate ? <a className="btn btnPrimary" href="#add-transaction"><Plus size={16}/> {activeTab === "expense" ? "Add Expense" : "Add New Income"}</a> : null}
+    </div>
+
+    <div className="moneyToolbar">
+      <strong>Total: <span>{money(activeTotal)}</span></strong>
+      <div className="headerActions">
+        <button className="btn btnYellow" type="button">Date Range</button>
+        <input className="input monthInput" type="month" defaultValue={new Date().toISOString().slice(0, 7)} aria-label="Date range month" />
       </div>
     </div>
 
-    <div className="metricGrid">
-      <Metric label="Income" value={money(stats.income)} icon={<ArrowUpCircle size={20}/>} />
-      <Metric label="Installments" value={money(stats.installments)} />
-      <Metric label="Expenses" value={money(stats.expense)} icon={<ArrowDownCircle size={20}/>} tone="warn" />
-      <Metric label="Net" value={money(net)} />
-    </div>
-
-    <div className="workspaceGrid">
-      {canCreateIncome ? <form action={addIncome} className="panel formSection">
-        <h2>Add Income</h2>
-        <div className="formGrid single">
-          <Field name="Title" label="Title" required />
-          <Field name="IncomesType" label="Income type" defaultValue="General" required />
+    {activeTab === "income" && canCreateIncome ? <details id="add-transaction" className="panel formSection createDrawer">
+      <summary className="sectionHeader"><h2>Add New Income</h2><span className="badge">Income record</span></summary>
+      <form action={addIncome} className="formSection">
+        <div className="formGrid">
+          <Field name="Title" label="Income Name" required />
+          <Field name="IncomesType" label="Income Type" defaultValue="Appointment" required />
           <Field name="Amount" label="Amount" type="number" required />
           <Field name="Date" label="Date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
           <Field name="foreign_id" label="Reference / case ID" />
           <Textarea name="Description" label="Description" />
         </div>
         <button className="btn btnPrimary"><Plus size={16}/> Add Income</button>
-      </form> : null}
+      </form>
+    </details> : null}
 
-      {canCreateExpense ? <form action={addExpense} className="panel formSection">
-        <h2>Add Expense</h2>
-        <div className="formGrid single">
+    {activeTab === "expense" && canCreateExpense ? <details id="add-transaction" className="panel formSection createDrawer">
+      <summary className="sectionHeader"><h2>Add Expense</h2><span className="badge">Expense voucher</span></summary>
+      <form action={addExpense} className="formSection">
+        <div className="formGrid">
           <Field name="voucher_no" label="Voucher no" />
-          <Field name="Title" label="Title" required />
-          <Field name="ExpenseType" label="Expense type" defaultValue="General" required />
+          <Field name="Title" label="Expense Name" required />
+          <Field name="ExpenseType" label="Expense Type" defaultValue="Others" required />
           <Field name="Amount" label="Amount" type="number" required />
           <Field name="Date" label="Date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required />
           <Textarea name="Description" label="Description" required />
         </div>
         <button className="btn btnPrimary"><Plus size={16}/> Add Expense</button>
-      </form> : null}
-    </div>
+      </form>
+    </details> : null}
 
     <section className="panel tableWrap">
-      <div className="sectionHeader"><h2>Recent Finance Activity</h2><span className="badge">{transactions.length} latest</span></div>
+      <div className="tableTools">
+        <div className="headerActions">
+          <label>Show <select className="input smallSelect" defaultValue="10" aria-label="Entries per page"><option>10</option><option>25</option><option>50</option></select> entries</label>
+          <button className="btn" type="button">PDF</button>
+          <button className="btn" type="button">Excel</button>
+        </div>
+        <label className="searchLabel">Search:<input className="input" aria-label="Search finance records" /></label>
+      </div>
+
       <table className="table dataTable">
-        <thead><tr><th>Type</th><th>Title</th><th>Category</th><th>Amount</th><th>Date</th><th>Reference</th><th className="actionColumn">Action</th></tr></thead>
-        <tbody>{transactions.map((item) => <tr key={`${item.type}-${item.id}`}>
-          <td><span className={`statusPill ${item.type === "expense" ? "dangerPill" : ""}`}>{item.type}</span></td>
+        <thead><tr>
+          <th>Serial #</th>
+          {activeTab === "expense" ? <th>Voucher No.</th> : null}
+          <th>{activeTab === "expense" ? "Expense Name" : "Title"}</th>
+          <th>{activeTab === "expense" ? "Expense Type" : "Income Type"}</th>
+          <th>Amount</th>
+          <th>Description</th>
+          <th>Date</th>
+          <th className="actionColumn">Actions</th>
+        </tr></thead>
+        <tbody>{transactions.map((item, index) => <tr key={`${item.type}-${item.id}`}>
+          <td>{index + 1}</td>
+          {activeTab === "expense" ? <td>{item.reference || "-"}</td> : null}
           <td>{item.title}</td>
           <td>{item.category}</td>
           <td>{money(item.amount)}</td>
+          <td>{item.description || "--"}</td>
           <td>{formatDate(item.date)}</td>
-          <td>{item.reference || "-"}</td>
-          <td className="actionColumn">{(item.type === "income" && canDeleteIncome) || (item.type === "expense" && canDeleteExpense) ? <form action={deleteTransaction}><input type="hidden" name="type" value={item.type}/><input type="hidden" name="id" value={item.id}/><button className="btn dangerButton">Delete</button></form> : <span className="muted">Locked</span>}</td>
+          <td className="actionColumn"><div className="actionStack">
+            <Link className="actionBtn edit" href={`/admin/${activeTab === "expense" ? "expenses" : "incomes"}/${item.id}/edit`} aria-label={`Edit ${activeTab}`}><Pencil size={18}/></Link>
+            {canDeleteForItem(item.type, canDeleteIncome, canDeleteExpense) ? <form action={deleteTransaction}><input type="hidden" name="type" value={item.type}/><input type="hidden" name="id" value={item.id}/><button className="actionBtn delete" aria-label={`Delete ${activeTab}`}><Trash2 size={18}/></button></form> : <span className="muted">Locked</span>}
+          </div></td>
         </tr>)}</tbody>
       </table>
+      {transactions.length === 0 ? <div className="emptyState">No {activeTab} records found.</div> : null}
+      <div className="tableFoot">Showing 1 to {Math.min(transactions.length, 10)} of {transactions.length} entries <span>Previous&nbsp;&nbsp;<b>1</b>&nbsp;&nbsp;Next</span></div>
     </section>
   </>;
 }
@@ -130,31 +169,30 @@ async function getPaymentStats() {
   const result = await getDb().query(`
     SELECT
       (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes") AS income,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses") AS expense,
-      (SELECT COALESCE(SUM(NULLIF(regexp_replace(amount, '[^0-9.-]', '', 'g'), '')::numeric), 0) FROM "case_installments") AS installments
+      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses") AS expense
   `);
   const row = result.rows[0] || {};
-  return { income: Number(row.income || 0), expense: Number(row.expense || 0), installments: Number(row.installments || 0) };
+  return { income: Number(row.income || 0), expense: Number(row.expense || 0) };
 }
 
-async function getTransactions() {
+async function getTransactions(type: FinanceTab) {
+  if (type === "expense") {
+    const result = await getDb().query(`
+      SELECT 'expense' AS type, id::text AS id, "Title" AS title, "ExpenseType" AS category, "Amount" AS amount, "Description" AS description, "Date" AS date, voucher_no AS reference
+      FROM "expenses"
+      ORDER BY "Date" DESC NULLS LAST, id DESC
+      LIMIT 80
+    `);
+    return result.rows;
+  }
+
   const result = await getDb().query(`
-    SELECT 'income' AS type, id::text AS id, "Title" AS title, "IncomesType" AS category, "Amount" AS amount, "Date" AS date, foreign_id AS reference
+    SELECT 'income' AS type, id::text AS id, "Title" AS title, "IncomesType" AS category, "Amount" AS amount, "Description" AS description, "Date" AS date, foreign_id AS reference
     FROM "incomes"
-    UNION ALL
-    SELECT 'expense' AS type, id::text AS id, "Title" AS title, "ExpenseType" AS category, "Amount" AS amount, "Date" AS date, voucher_no AS reference
-    FROM "expenses"
-    UNION ALL
-    SELECT 'installment' AS type, ci.id::text AS id, ci.name AS title, 'Case installment' AS category, NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric AS amount, ci.time::date AS date, ci.client_case_id::text AS reference
-    FROM "case_installments" ci
-    ORDER BY date DESC NULLS LAST
+    ORDER BY "Date" DESC NULLS LAST, id DESC
     LIMIT 80
   `);
   return result.rows;
-}
-
-function Metric({ label, value, icon, tone }: { label: string; value: string; icon?: React.ReactNode; tone?: "warn" }) {
-  return <div className={`metricCard ${tone === "warn" ? "metricWarn" : ""}`}><div className="metricTop"><span>{label}</span>{icon}</div><strong>{value}</strong></div>;
 }
 
 function Field({ name, label, type = "text", required, defaultValue }: { name: string; label: string; type?: string; required?: boolean; defaultValue?: string }) {
@@ -167,6 +205,10 @@ function Textarea({ name, label, required }: { name: string; label: string; requ
 
 function AccessDenied() {
   return <div className="panel"><h1>Payments</h1><p className="muted">You do not have permission to access finance records.</p></div>;
+}
+
+function canDeleteForItem(type: string, canDeleteIncome: boolean, canDeleteExpense: boolean) {
+  return (type === "income" && canDeleteIncome) || (type === "expense" && canDeleteExpense);
 }
 
 function formatDate(value: unknown) {

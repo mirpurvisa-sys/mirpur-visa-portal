@@ -1,3 +1,6 @@
+import Image from "next/image";
+import Link from "next/link";
+import { LockKeyhole, UserRound } from "lucide-react";
 import { redirectIfLoggedIn, login } from "@/lib/auth";
 import { redirect } from "next/navigation";
 
@@ -18,24 +21,27 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     redirect("/admin");
   }
 
-  return <main style={{minHeight:"100vh",display:"grid",placeItems:"center",padding:24}}>
-    <form action={loginAction} className="card" style={{width:"min(440px,100%)",padding:28}}>
-      <div style={{marginBottom:22}}>
-        <h1 style={{fontSize:30,fontWeight:900,margin:"0 0 8px"}}>MVC Admin</h1>
-        <p style={{color:"#64748b",margin:0}}>Sign in with your portal account.</p>
-      </div>
-      {sp.error ? <div style={{border:"1px solid #fecaca",background:"#fff1f2",color:"#be123c",borderRadius:12,padding:12,marginBottom:16,fontWeight:700}}>Invalid email or password.</div> : null}
-      <div style={{display:"grid",gap:14}}>
-        <div>
-          <label className="label">Email</label>
-          <input className="input" name="email" type="email" autoComplete="email" required />
+  return <main className="loginPage">
+    <form action={loginAction} className="loginCard">
+      <Image className="loginLogo" src="/mvc-logo.jpg" alt="Mirpur Visa Consultant" width={112} height={112} priority />
+      <h1>Login</h1>
+      {sp.error ? <div className="notice errorNotice">Invalid email or password.</div> : null}
+      <div className="loginGrid">
+        <label className="loginRow">
+          <span><UserRound size={22}/></span>
+          <input name="email" type="email" autoComplete="email" required />
+        </label>
+        <label className="loginRow">
+          <span><LockKeyhole size={22}/></span>
+          <input name="password" type="password" autoComplete="current-password" required />
+        </label>
+        <div className="loginMeta">
+          <label><input type="checkbox" name="remember" /> Remember Me</label>
+          <Link href="/login">Forgot Password?</Link>
         </div>
-        <div>
-          <label className="label">Password</label>
-          <input className="input" name="password" type="password" autoComplete="current-password" required />
-        </div>
-        <button className="btn btnPrimary" style={{justifyContent:"center"}}>Sign In</button>
+        <button className="btn btnPrimary">Login</button>
       </div>
     </form>
+    <Link className="btn" href="/login" style={{position:"fixed",left:24,bottom:24,background:"#ffc107",borderColor:"#ffc107"}}>Book Appointment Now</Link>
   </main>;
 }

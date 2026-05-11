@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData, parseRecordWhere } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
@@ -39,12 +40,25 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
     redirect(`/admin/${res.key}`);
   }
-  return <><p><Link href={`/admin/${resource.key}`}>Back</Link></p><div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h1 style={{fontSize:30,fontWeight:900}}>Edit {resource.title}</h1>{userCanDelete ? <form action={deleteAction}><button className="btn" style={{color:"#dc2626"}}>Delete</button></form> : null}</div><ResourceForm resource={visibleResource} row={row} action={updateAction} button="Save Changes" /></>;
+  return <>
+    <div className="erpHeader">
+      <div>
+        <div className="eyebrow">Edit</div>
+        <h1>Edit {resource.title}</h1>
+        <p>Update this record using the database fields available to your role.</p>
+      </div>
+      <div className="headerActions">
+        <Link className="btn" href={`/admin/${resource.key}`}><ArrowLeft size={16}/> Back</Link>
+        {userCanDelete ? <form action={deleteAction}><button className="btn dangerButton"><Trash2 size={16}/> Delete</button></form> : null}
+      </div>
+    </div>
+    <ResourceForm resource={visibleResource} row={row} action={updateAction} button="Save Changes" />
+  </>;
 }
 
 function AccessDenied({ title, message }: { title: string; message: string }) {
-  return <div className="card" style={{padding:24}}>
-    <h1 style={{fontSize:30,fontWeight:900,marginTop:0}}>{title}</h1>
-    <p style={{color:"#64748b",marginBottom:0}}>{message}</p>
+  return <div className="panel">
+    <h1>{title}</h1>
+    <p className="muted">{message}</p>
   </div>;
 }

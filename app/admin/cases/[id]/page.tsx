@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { MapPin, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
@@ -9,8 +9,9 @@ import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime
 
 export const dynamic = "force-dynamic";
 
-export default async function CaseWorkspace({ params }: { params: Promise<{ id: string }> }) {
+export default async function CaseWorkspace({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ mode?: string }> }) {
   const { id } = await params;
+  const sp = await searchParams;
   const caseId = Number(id);
   if (!Number.isFinite(caseId)) notFound();
 
@@ -177,113 +178,149 @@ export default async function CaseWorkspace({ params }: { params: Promise<{ id: 
     redirect("/admin/cases");
   }
 
+  const isEdit = sp.mode === "edit" && canEdit;
   const paid = Number(caseRow.total_paid || 0);
   const total = Number(caseRow.total || 0);
+  const formId = `case-update-${caseRow.id}`;
+  const assignedTo = [caseRow.employee_firstname, caseRow.employee_lastname].filter(Boolean).join(" ") || "-";
+  const clientName = caseRow.client_name || `${caseRow.firstname} ${caseRow.lastname}`.trim();
 
   return <>
-    <div className="erpHeader">
+    <form id={formId} action={updateCase} />
+
+    <section className="profileHero">
+      <img className="profilePhoto" src="/avatar.svg" alt="" />
       <div>
-        <div className="eyebrow">Case workspace</div>
-        <h1>Case #{caseRow.id}</h1>
-        <p>{caseRow.client_name || `${caseRow.firstname} ${caseRow.lastname}`} - {caseRow.caseCategory || "General"} - {caseRow.status || "Open"}</p>
-      </div>
-      <div className="headerActions">
-        <Link className="btn" href="/admin/cases">Back</Link>
-        {canDelete ? <form action={deleteCase}><button className="btn dangerButton">Delete Case</button></form> : null}
-      </div>
-    </div>
-
-    {showFinance ? <div className="metricGrid">
-      <Metric label="Total" value={money(total)} />
-      <Metric label="Paid" value={money(paid)} />
-      <Metric label="Remaining" value={money(caseRow.remaining)} tone="warn" />
-      <Metric label="Installments" value={installments.length.toLocaleString()} />
-    </div> : <div className="metricGrid">
-      <Metric label="Status" value={String(caseRow.status || "Open")} />
-      <Metric label="Category" value={String(caseRow.caseCategory || "General")} />
-      <Metric label="Start Date" value={dateInput(caseRow.startDate) || "-"} />
-    </div>}
-
-    <div className="workspaceGrid">
-      <form action={updateClient} className="panel formSection">
-        <h2>Client Profile</h2>
-        <input type="hidden" name="client_id" value={caseRow.client_id} />
-        <div className="formGrid">
-          <Field name="firstname" label="First name" defaultValue={caseRow.firstname} disabled={!canEdit} required />
-          <Field name="lastname" label="Last name" defaultValue={caseRow.lastname} disabled={!canEdit} required />
-          <Field name="email" label="Email" type="email" defaultValue={caseRow.email} disabled={!canEdit} />
-          <Field name="phone" label="Phone" defaultValue={caseRow.phone} disabled={!canEdit} required />
-          <Field name="phone2" label="Second phone" defaultValue={caseRow.phone2} disabled={!canEdit} />
-          <Field name="cnic" label="CNIC" defaultValue={caseRow.cnic} disabled={!canEdit} />
-          <Field name="gender" label="Gender" defaultValue={caseRow.gender} disabled={!canEdit} required />
-          <Field name="city" label="City" defaultValue={caseRow.city} disabled={!canEdit} />
-          <Field name="province" label="Province" defaultValue={caseRow.province} disabled={!canEdit} />
-          <Field name="country" label="Country" defaultValue={caseRow.country} disabled={!canEdit} />
-          <Field name="destination_country" label="Destination" defaultValue={caseRow.destination_country} disabled={!canEdit} />
-          <Field name="visa_category" label="Visa category" defaultValue={caseRow.visa_category} disabled={!canEdit} />
-          <Field name="passport_no" label="Passport no" defaultValue={caseRow.passport_no} disabled={!canEdit} />
-          <Field name="passport_issue" label="Passport issue" type="date" defaultValue={dateInput(caseRow.passport_issue)} disabled={!canEdit} />
-          <Field name="passport_expiry" label="Passport expiry" type="date" defaultValue={dateInput(caseRow.passport_expiry)} disabled={!canEdit} />
-          <Field name="documents" label="Documents" defaultValue={caseRow.documents} disabled={!canEdit} />
-          <Field name="address" label="Address" defaultValue={caseRow.address} disabled={!canEdit} wide required />
+        <div className="profileTitle">
+          <h1>{caseRow.client_name || `${caseRow.firstname} ${caseRow.lastname}`}</h1>
+          <span><MapPin size={22}/>{caseRow.province || caseRow.city || caseRow.country || "-"}</span>
         </div>
-        {canEdit ? <button className="btn btnPrimary">Save Client</button> : null}
-      </form>
-
-      <form action={updateCase} className="panel formSection">
-        <h2>Case & Assignment</h2>
-        <input type="hidden" name="appointment_id" value={caseRow.appointment_id} />
-        <div className="formGrid">
-          <Field name="client_name" label="Display client name" defaultValue={caseRow.client_name} disabled={!canEdit} />
-          <EmployeeSelect employees={employees} value={caseRow.employee_id} disabled={!canEdit} />
-          <Field name="caseCategory" label="Case category" defaultValue={caseRow.caseCategory} disabled={!canEdit} required />
-          <Select name="status" label="Status" value={caseRow.status || "Open"} disabled={!canEdit} options={["Open", "In Process", "Pending", "Completed", "Closed"]} />
-          {showFinance ? <>
-            <Field name="total" label="Total amount" type="number" defaultValue={caseRow.total} disabled={!canEdit} required />
-            <Field name="advance" label="Advance" type="number" defaultValue={caseRow.advance} disabled={!canEdit} required />
-          </> : null}
-          <Field name="startDate" label="Start date" type="date" defaultValue={dateInput(caseRow.startDate)} disabled={!canEdit} required />
-          <Field name="endDate" label="End date" type="date" defaultValue={dateInput(caseRow.endDate)} disabled={!canEdit} />
-          <Field name="submitted_on" label="Submitted on" type="date" defaultValue={dateInput(caseRow.submitted_on)} disabled={!canEdit} />
-          <Field name="travel_dates" label="Travel dates" defaultValue={caseRow.travel_dates} disabled={!canEdit} />
-          <Field name="docs" label="Docs status" defaultValue={caseRow.docs} disabled={!canEdit} />
-          {showFinance ? <Field name="appointment_fee" label="Appointment fee" type="number" defaultValue={caseRow.appointment_fee} disabled={!canEdit} /> : null}
-          <Select name="appointment_category" label="Appointment type" value={caseRow.appointment_category || "visit"} disabled={!canEdit} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
-          {showFinance ? <Select name="appointmentstatus" label="Payment status" value={caseRow.appointmentstatus || "Unpaid"} disabled={!canEdit} options={["Paid", "Unpaid"]} /> : null}
-          <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(caseRow.appointmentdate)} disabled={!canEdit} required />
-          <Field name="documents_note" label="Document notes" defaultValue={caseRow.documents_note} disabled={!canEdit} wide />
-          <Textarea name="description" label="Description" defaultValue={caseRow.description} disabled={!canEdit} />
+        <div className="detailGrid">
+          <strong>Client Information</strong><span />
+          <span>Reference ID</span><span>{caseRow.ref_id || "-"}</span>
+          <span>CNIC</span><span>{caseRow.cnic || "-"}</span>
+          <span>Phone</span><span>{caseRow.phone || "-"}</span>
+          <span>Email</span><span>{caseRow.email || "-"}</span>
+          {!isEdit ? <><span>Gender</span><span>{caseRow.gender || "-"}</span></> : null}
+          <span>Address</span><span>{[caseRow.address, caseRow.city, caseRow.province, caseRow.country].filter(Boolean).join(", ") || "-"}</span>
         </div>
-        <div className="checkGrid">
+        <div className="profileActions">
+          <Link className="btn btnYellow" href={isEdit ? `/admin/cases/${caseId}` : `/admin/cases/${caseId}?mode=edit`}>{isEdit ? "View Case" : "Edit Case"}</Link>
+          <Link className="btn" href="/admin/cases">Back</Link>
+          {canDelete ? <form action={deleteCase}><button className="btn dangerButton">Delete Case</button></form> : null}
+        </div>
+      </div>
+    </section>
+
+    <section className="caseLegacySection">
+      <h2>{isEdit ? "Edit Case" : "View Case"}</h2>
+
+      {showFinance ? <div className="casePaymentPanel">
+        <div>
+          <h3>Payment Details</h3>
+          {isEdit ? <div className="paymentFormGrid">
+            <Field formId={formId} name="total" label="Total Amount *" type="number" defaultValue={caseRow.total} required />
+            <Field formId={formId} name="appointment_fee" label="Paid Appointment Fee" type="number" defaultValue={caseRow.appointment_fee} readOnly />
+            <Field name="total_paid_display" label="Total Paid Installments" type="number" defaultValue={paid} readOnly />
+            <Field name="remaining_display" label="Remaining Dues" type="number" defaultValue={caseRow.remaining} readOnly />
+            <Field formId={formId} name="advance" label="Advance Amount *" type="number" defaultValue={caseRow.advance} required />
+          </div> : <div className="paymentReadGrid">
+            <span>Total Amount</span><strong>{plainMoney(total)}</strong>
+            <span>Paid Appointment Fee</span><strong>{plainMoney(caseRow.appointment_fee)}</strong>
+            <span>Total Paid Installments</span><strong>{plainMoney(paid)}</strong>
+            <span>Remaining Amount</span><strong>{plainMoney(caseRow.remaining)}</strong>
+            <span>Advance Amount</span><strong>{plainMoney(caseRow.advance)}</strong>
+          </div>}
+        </div>
+
+        <div>
+          <h3>Installment Details</h3>
+          <table className="table dataTable installmentMiniTable">
+            <thead><tr><th>Date & Time</th><th>Installment Name</th><th>Amount</th>{isEdit && canDelete ? <th>Action</th> : null}</tr></thead>
+            <tbody>{installments.length ? installments.map((item) => <tr key={item.id}>
+              <td><strong>{dateTimeInput(item.time).replace("T", " ")}</strong></td>
+              <td>{item.name}</td>
+              <td>{plainMoney(item.amount)}</td>
+              {isEdit && canDelete ? <td><form action={deleteInstallment}><input type="hidden" name="installment_id" value={item.id}/><button className="actionBtn delete" aria-label="Delete installment"><Trash2 size={16}/></button></form></td> : null}
+            </tr>) : <tr><td colSpan={isEdit && canDelete ? 4 : 3}>No installments added.</td></tr>}</tbody>
+          </table>
+          {isEdit ? <form action={addInstallment} className="installmentAddForm">
+            <input className="input" name="name" placeholder="Installment name" required />
+            <input className="input" name="amount" type="number" step="0.01" placeholder="Amount" required />
+            <input className="input" name="time" type="datetime-local" defaultValue={localDateTime()} required />
+            <button className="btn btnPrimary">Add Installment</button>
+          </form> : null}
+        </div>
+      </div> : null}
+
+      {isEdit ? <>
+        <input form={formId} type="hidden" name="client_name" value={clientName} />
+        <input form={formId} type="hidden" name="appointmentdate" value={dateTimeInput(caseRow.appointmentdate) || localDateTime()} />
+        {!showFinance ? <>
+          <input form={formId} type="hidden" name="total" value={caseRow.total || 0} />
+          <input form={formId} type="hidden" name="advance" value={caseRow.advance || 0} />
+          <input form={formId} type="hidden" name="appointment_fee" value={caseRow.appointment_fee || 0} />
+          <input form={formId} type="hidden" name="appointmentstatus" value={caseRow.appointmentstatus || "Unpaid"} />
+        </> : null}
+        <div className="legacyCaseFormGrid">
+          <Field name="email_display" label="Email *" type="email" defaultValue={caseRow.email} readOnly />
+          <Field formId={formId} name="caseCategory" label="Case Category *" defaultValue={caseRow.caseCategory} required />
+          <Select formId={formId} name="status" label="Case Status *" value={caseRow.status || "In Progress"} options={["Open", "In Progress", "In Process", "Pending", "Completed", "Closed"]} />
+          <Field formId={formId} name="startDate" label="Start Date *" type="date" defaultValue={dateInput(caseRow.startDate)} required />
+          <Field formId={formId} name="endDate" label="End Date" type="date" defaultValue={dateInput(caseRow.endDate)} />
+          <Field formId={formId} name="submitted_on" label="Submitted on" type="date" defaultValue={dateInput(caseRow.submitted_on)} />
+          <Field formId={formId} name="travel_dates" label="Travel Dates" defaultValue={caseRow.travel_dates} />
+          <EmployeeSelect formId={formId} employees={employees} value={caseRow.employee_id} />
+          <Field formId={formId} name="description" label="Description" defaultValue={caseRow.description} wide />
+          <Select formId={formId} name="appointment_category" label="Appointment Type" value={caseRow.appointment_category || "visit"} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
+          {showFinance ? <Select formId={formId} name="appointmentstatus" label="Appointment Payment" value={caseRow.appointmentstatus || "Unpaid"} options={["Paid", "Unpaid"]} /> : null}
+        </div>
+        <div className="legacyCheckGrid">
           {["email_gen", "travel_history", "previous_refusal", "vfa", "dfa", "personal_documents", "job_documents", "business_documents"].map((item) => (
-            <label key={item}><input type="checkbox" name={item} defaultChecked={Boolean(Number(caseRow[item] || 0))} disabled={!canEdit} /> {item.replace(/_/g, " ")}</label>
+            <label key={item}><input form={formId} type="checkbox" name={item} defaultChecked={Boolean(Number(caseRow[item] || 0))} /> {labelFromKey(item)}</label>
           ))}
         </div>
-        {canEdit ? <button className="btn btnPrimary">Save Case</button> : null}
-      </form>
-    </div>
-
-    {showFinance ? <section className="panel formSection">
-      <div className="sectionHeader"><h2>Installments</h2><span className="badge">{money(paid)} received</span></div>
-      {canEdit ? <form action={addInstallment} className="inlineForm">
-        <input className="input" name="name" placeholder="Installment name" required />
-        <input className="input" name="amount" type="number" step="0.01" placeholder="Amount" required />
-        <input className="input" name="time" type="datetime-local" defaultValue={localDateTime()} required />
-        <button className="btn btnPrimary">Add Installment</button>
-      </form> : null}
-
-      <div className="tableWrap">
-        <table className="table dataTable">
-          <thead><tr><th>Name</th><th>Amount</th><th>Time</th>{canDelete ? <th className="actionColumn">Action</th> : null}</tr></thead>
-          <tbody>{installments.map((item) => <tr key={item.id}>
-            <td>{item.name}</td>
-            <td>{money(item.amount)}</td>
-            <td>{dateTimeInput(item.time).replace("T", " ")}</td>
-            {canDelete ? <td className="actionColumn"><form action={deleteInstallment}><input type="hidden" name="installment_id" value={item.id}/><button className="iconDanger" aria-label="Delete installment"><Trash2 size={16}/></button></form></td> : null}
-          </tr>)}</tbody>
+        <div className="documentsBlock">
+          <label>Documents</label>
+          <div><label><input form={formId} type="radio" name="docs" value="Pending" defaultChecked={String(caseRow.docs || "Pending") === "Pending"} /> Pending</label> <label><input form={formId} type="radio" name="docs" value="Completed" defaultChecked={String(caseRow.docs || "") === "Completed"} /> Completed</label></div>
+          <label>Documents Note</label>
+          <input form={formId} className="input" name="documents_note" defaultValue={stringValue(caseRow.documents_note)} />
+          <label>Attach New Documents</label>
+          <input className="fileInput" type="file" multiple />
+          <div className="fakeProgress"><span>0%</span></div>
+        </div>
+        <button form={formId} className="btn btnPrimary">Update</button>
+      </> : <>
+        <div className="caseFactsGrid">
+          <div><span>Category</span><strong>{caseRow.caseCategory || "-"}</strong></div>
+          <div><span>start Date</span><strong>{dateInput(caseRow.startDate) || "-"}</strong></div>
+          <div><span>End Date</span><strong>{dateInput(caseRow.endDate) || "-"}</strong></div>
+          <div><span>Submitted on</span><strong>{dateInput(caseRow.submitted_on) || "-"}</strong></div>
+          <div><span>Assigned To</span><strong>{assignedTo}</strong></div>
+          <div><span>Travel Dates</span><strong>{caseRow.travel_dates || "-"}</strong></div>
+          <div><span>Description</span><strong>{caseRow.description || "-"}</strong></div>
+          <div><span>Case Status</span><strong>{formatStatus(caseRow.status)}</strong></div>
+          <div><span>Documents Note</span><strong>{caseRow.documents_note || "-"}</strong></div>
+        </div>
+        <table className="table dataTable statusMatrix">
+          <thead><tr>{["Email Generated", "Travel History", "Previous Refusal", "VFA", "DFA", "Documents", "Personal Documents", "Job Documents", "Business Documents"].map((label) => <th key={label}>{label}</th>)}</tr></thead>
+          <tbody><tr>
+            <td>{yesNo(caseRow.email_gen)}</td>
+            <td>{yesNo(caseRow.travel_history)}</td>
+            <td>{yesNo(caseRow.previous_refusal)}</td>
+            <td>{yesNo(caseRow.vfa)}</td>
+            <td>{yesNo(caseRow.dfa)}</td>
+            <td>{caseRow.docs || "Pending"}</td>
+            <td>{yesNo(caseRow.personal_documents)}</td>
+            <td>{yesNo(caseRow.job_documents)}</td>
+            <td>{yesNo(caseRow.business_documents)}</td>
+          </tr></tbody>
         </table>
-      </div>
-    </section> : null}
+        <h3 className="attachmentsTitle">Attachments</h3>
+        <div className="familyHeader"><h3>Family Details</h3><button className="btn btnPrimary" type="button">Add Member</button></div>
+        <div className="panel tableWrap familyPanel"><table className="table dataTable"><thead><tr><th>Photo</th><th>Full Name</th><th>Phone</th><th>Relation</th><th>Destination Country</th><th>Action</th><th>Make Client</th></tr></thead><tbody /></table></div>
+      </>}
+    </section>
   </>;
 }
 
@@ -292,12 +329,14 @@ async function getCase(caseId: number) {
     `
       SELECT
         cc.*,
-        c.firstname, c.lastname, c.email, c.phone, c.phone2, c.cnic, c.gender, c.city, c.province, c.country,
+        c.ref_id, c.firstname, c.lastname, c.email, c.phone, c.phone2, c.cnic, c.gender, c.city, c.province, c.country,
         c.address, c.destination_country, c.visa_category, c.passport_no, c.passport_issue, c.passport_expiry, c.documents,
-        a.fee AS appointment_fee, a.appointmentstatus, a.category AS appointment_category, a.appointmentdate
+        a.fee AS appointment_fee, a.appointmentstatus, a.category AS appointment_category, a.appointmentdate,
+        e.firstname AS employee_firstname, e.lastname AS employee_lastname
       FROM "client_cases" cc
       JOIN "clients" c ON c.id = cc.client_id
       LEFT JOIN "appointments" a ON a.id = cc.appointment_id
+      LEFT JOIN "employees" e ON e.id = cc.employee_id
       WHERE cc.id = $1
       LIMIT 1
     `,
@@ -311,20 +350,20 @@ async function getInstallments(caseId: number) {
   return result.rows;
 }
 
-function Field({ name, label, type = "text", defaultValue, disabled, required, wide }: { name: string; label: string; type?: string; defaultValue?: unknown; disabled?: boolean; required?: boolean; wide?: boolean }) {
-  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input className="input" name={name} type={type} defaultValue={stringValue(defaultValue)} disabled={disabled} required={required} step={type === "number" ? "0.01" : undefined} /></div>;
+function Field({ name, label, type = "text", defaultValue, disabled, required, wide, readOnly, formId }: { name: string; label: string; type?: string; defaultValue?: unknown; disabled?: boolean; required?: boolean; wide?: boolean; readOnly?: boolean; formId?: string }) {
+  return <div style={{gridColumn: wide ? "1 / -1" : undefined}}><label className="label">{label}</label><input form={formId} className="input" name={name} type={type} defaultValue={stringValue(defaultValue)} disabled={disabled} required={required} readOnly={readOnly} step={type === "number" ? "0.01" : undefined} /></div>;
 }
 
-function Textarea({ name, label, defaultValue, disabled }: { name: string; label: string; defaultValue?: unknown; disabled?: boolean }) {
-  return <div style={{gridColumn:"1 / -1"}}><label className="label">{label}</label><textarea className="input" name={name} rows={4} defaultValue={stringValue(defaultValue)} disabled={disabled} /></div>;
+function Textarea({ name, label, defaultValue, disabled, formId }: { name: string; label: string; defaultValue?: unknown; disabled?: boolean; formId?: string }) {
+  return <div style={{gridColumn:"1 / -1"}}><label className="label">{label}</label><textarea form={formId} className="input" name={name} rows={4} defaultValue={stringValue(defaultValue)} disabled={disabled} /></div>;
 }
 
-function EmployeeSelect({ employees, value, disabled }: { employees: Awaited<ReturnType<typeof employeeOptions>>; value?: unknown; disabled?: boolean }) {
-  return <div><label className="label">Assigned employee</label><select className="input" name="employee_id" defaultValue={String(value ?? "")} disabled={disabled} required>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.label} {employee.detail ? `- ${employee.detail}` : ""}</option>)}</select></div>;
+function EmployeeSelect({ employees, value, disabled, formId }: { employees: Awaited<ReturnType<typeof employeeOptions>>; value?: unknown; disabled?: boolean; formId?: string }) {
+  return <div><label className="label">Assigned to *</label><select form={formId} className="input" name="employee_id" defaultValue={String(value ?? "")} disabled={disabled} required>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.label} {employee.detail ? `- ${employee.detail}` : ""}</option>)}</select></div>;
 }
 
-function Select({ name, label, value, options, disabled }: { name: string; label: string; value?: string; options: Array<string | { value: string; label: string }>; disabled?: boolean }) {
-  return <div><label className="label">{label}</label><select className="input" name={name} defaultValue={value} disabled={disabled}>{options.map((option) => {
+function Select({ name, label, value, options, disabled, formId }: { name: string; label: string; value?: string; options: Array<string | { value: string; label: string }>; disabled?: boolean; formId?: string }) {
+  return <div><label className="label">{label}</label><select form={formId} className="input" name={name} defaultValue={value} disabled={disabled}>{options.map((option) => {
     const optionValue = typeof option === "string" ? option : option.value;
     const optionLabel = typeof option === "string" ? option : option.label;
     return <option key={optionValue} value={optionValue}>{optionLabel}</option>;
@@ -343,6 +382,33 @@ function stringValue(value: unknown) {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return String(value);
+}
+
+function plainMoney(value: unknown) {
+  return money(value).replace("PKR", "").trim();
+}
+
+function yesNo(value: unknown) {
+  return Number(value || 0) ? "YES" : "NO";
+}
+
+function labelFromKey(value: string) {
+  const labels: Record<string, string> = {
+    email_gen: "Email Generated",
+    travel_history: "Travel History",
+    previous_refusal: "Previous Refusal",
+    vfa: "Visa Form Application",
+    dfa: "Draft Form Approval",
+    personal_documents: "Personal Documents",
+    job_documents: "Job Documents",
+    business_documents: "Business Documents",
+  };
+  return labels[value] || value.replace(/_/g, " ");
+}
+
+function formatStatus(value: unknown) {
+  const status = String(value || "In Progress").trim();
+  return status === "In Process" ? "In Progress" : status;
 }
 
 function textFromValue(value: unknown, fallback: string) {

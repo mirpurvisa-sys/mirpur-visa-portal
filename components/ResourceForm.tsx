@@ -3,8 +3,8 @@ import type { Field, Resource } from "@/lib/adminConfig";
 export function ResourceForm({ resource, row, action, button }: { resource: Resource; row?: any; action: any; button: string }) {
   const mode = row ? "edit" : "create";
 
-  return <form action={action} className="card" style={{ padding: 22 }}>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:16}}>
+  return <form action={action} className="panel formSection">
+    <div className="formGrid">
       {resource.fields.map((field) => {
         const value = row ? row[field.name] : undefined;
         const required = mode === "create"
