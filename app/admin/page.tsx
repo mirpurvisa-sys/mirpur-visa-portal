@@ -133,6 +133,16 @@ function MoneyTrailChart({ data }: { data: MoneyPoint[] }) {
       {data.length ? <>
         <polyline points={incomePoints.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#2da9df" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
         <polyline points={expensePoints.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke="#f9b800" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        {incomePoints.map((point, index) => {
+          const value = data[index].income;
+          if (value <= 0) return null;
+          return <text className="chartPointLabel incomeValue" key={`income-label-${data[index].month}`} x={point.x} y={Math.max(18, point.y - 14)} textAnchor="middle">{compactMoney(value)}</text>;
+        })}
+        {expensePoints.map((point, index) => {
+          const value = data[index].expense;
+          if (value <= 0) return null;
+          return <text className="chartPointLabel expenseValue" key={`expense-label-${data[index].month}`} x={point.x} y={Math.min(326, point.y + 24)} textAnchor="middle">{compactMoney(value)}</text>;
+        })}
         {incomePoints.map((point, index) => <circle key={`income-${data[index].month}`} cx={point.x} cy={point.y} r="6" fill="#5f5364" />)}
         {expensePoints.map((point, index) => <circle key={`expense-${data[index].month}`} cx={point.x} cy={point.y} r="6" fill="#5f5364" />)}
         {data.map((point, index) => {
@@ -188,9 +198,46 @@ async function getDashboardStats(includeFinance: boolean) {
   }
 
   const finance = await getDb().query(`
+    WITH paid_appointments AS (
+      SELECT
+        a.id,
+        a.client_id,
+        a.fee,
+        a.appointmentdate,
+        trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))) AS client_name
+      FROM "appointments" a
+      JOIN "clients" c ON c.id = a.client_id
+      WHERE regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
+        AND COALESCE(a.fee, 0) > 0
+    ),
+    unsynced_appointment_income AS (
+      SELECT *
+      FROM paid_appointments a
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM "incomes" i
+        WHERE i."IncomesType" ILIKE 'Appointment%'
+          AND (
+            i.foreign_id = a.id::text
+            OR i.foreign_id = a.id::text || a.client_id::text
+            OR i.foreign_id LIKE (a.id::text || a.client_id::text || '%')
+            OR (
+              COALESCE(i."Title", '') = a.client_name
+              AND COALESCE(i."Amount", 0) = COALESCE(a.fee, 0)
+              AND i."Date" = a.appointmentdate::date
+            )
+          )
+      )
+    )
     SELECT
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE date_trunc('month', "Date") = date_trunc('month', CURRENT_DATE)) AS month_income,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE "Date"::date = CURRENT_DATE) AS today_income,
+      (
+        (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE date_trunc('month', "Date") = date_trunc('month', CURRENT_DATE))
+        + (SELECT COALESCE(SUM(fee), 0) FROM unsynced_appointment_income WHERE date_trunc('month', appointmentdate) = date_trunc('month', CURRENT_DATE))
+      ) AS month_income,
+      (
+        (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE "Date"::date = CURRENT_DATE)
+        + (SELECT COALESCE(SUM(fee), 0) FROM unsynced_appointment_income WHERE appointmentdate::date = CURRENT_DATE)
+      ) AS today_income,
       (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE date_trunc('month', "Date") = date_trunc('month', CURRENT_DATE)) AS month_expense,
       (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE "Date"::date = CURRENT_DATE) AS today_expense
   `);
@@ -221,6 +268,39 @@ async function getMoneyTrail(): Promise<MoneyPoint[]> {
       WHERE "Date" >= date_trunc('month', CURRENT_DATE) - interval '4 months'
       GROUP BY 1
     ),
+    paid_appointments AS (
+      SELECT
+        a.id,
+        a.client_id,
+        a.fee,
+        a.appointmentdate,
+        trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))) AS client_name
+      FROM "appointments" a
+      JOIN "clients" c ON c.id = a.client_id
+      WHERE regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
+        AND COALESCE(a.fee, 0) > 0
+    ),
+    appointment_income AS (
+      SELECT date_trunc('month', appointmentdate)::date AS month, COALESCE(SUM(fee), 0) AS amount
+      FROM paid_appointments a
+      WHERE appointmentdate >= date_trunc('month', CURRENT_DATE) - interval '4 months'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "incomes" i
+          WHERE i."IncomesType" ILIKE 'Appointment%'
+            AND (
+              i.foreign_id = a.id::text
+              OR i.foreign_id = a.id::text || a.client_id::text
+              OR i.foreign_id LIKE (a.id::text || a.client_id::text || '%')
+              OR (
+                COALESCE(i."Title", '') = a.client_name
+                AND COALESCE(i."Amount", 0) = COALESCE(a.fee, 0)
+                AND i."Date" = a.appointmentdate::date
+              )
+            )
+        )
+      GROUP BY 1
+    ),
     expense AS (
       SELECT date_trunc('month', "Date")::date AS month, COALESCE(SUM("Amount"), 0) AS amount
       FROM "expenses"
@@ -230,10 +310,11 @@ async function getMoneyTrail(): Promise<MoneyPoint[]> {
     SELECT
       to_char(m.month, 'YYYY-MM') AS month,
       to_char(m.month, 'FMMonth-YYYY') AS label,
-      COALESCE(income.amount, 0) AS income,
+      COALESCE(income.amount, 0) + COALESCE(appointment_income.amount, 0) AS income,
       COALESCE(expense.amount, 0) AS expense
     FROM months m
     LEFT JOIN income ON income.month = m.month
+    LEFT JOIN appointment_income ON appointment_income.month = m.month
     LEFT JOIN expense ON expense.month = m.month
     ORDER BY m.month ASC
   `);

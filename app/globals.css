@@ -686,6 +686,16 @@ input, select, textarea { outline: none; }
 .moneyChart { min-height: 455px; display: grid; place-items: center; padding-top: 30px; }
 .moneyChart svg { width: 100%; max-width: 820px; height: auto; }
 .moneyChart text { fill: #6d7480; font-size: 13px; }
+.moneyChart .chartPointLabel {
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-linejoin: round;
+  stroke-width: 5px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.moneyChart .incomeValue { fill: var(--mvc-blue); }
+.moneyChart .expenseValue { fill: #d89a00; }
 .chartHoverZone {
   fill: transparent;
   pointer-events: all;
