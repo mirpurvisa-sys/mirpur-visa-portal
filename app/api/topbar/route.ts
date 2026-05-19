@@ -42,7 +42,8 @@ async function getTopbarSearchItems(user: CurrentUser): Promise<TopbarSearchItem
     items.push({ title: "Team Management", subtitle: "Employees and assigned cases", href: "/admin/employees", group: "Navigation" });
   }
   if (canViewFinance(user)) {
-    items.push({ title: "Money Trail", subtitle: "Income and expenses", href: "/admin/payments", group: "Navigation" });
+    items.push({ title: "Expenses", subtitle: "Expense vouchers and records", href: "/admin/expenses", group: "Navigation" });
+    items.push({ title: "Income", subtitle: "Income records", href: "/admin/payments?tab=income", group: "Navigation" });
   }
   if (canViewResource(user, "reminders")) {
     items.push({ title: "Reminders", subtitle: "Upcoming follow ups", href: "/admin/reminders", group: "Navigation" });

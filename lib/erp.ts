@@ -1,5 +1,7 @@
 import { getDb } from "./db";
 
+const EXPENSE_VOUCHER_SEQUENCE_FLOOR = 4694;
+
 export type SelectOption = {
   id: number;
   label: string;
@@ -103,6 +105,21 @@ export async function syncCaseTotals(caseId: number) {
     `,
     [caseId],
   );
+}
+
+export async function nextExpenseVoucherNo() {
+  const result = await getDb().query(`
+    WITH latest AS (
+      SELECT NULLIF(substring(trim(voucher_no) from '([0-9]+)$'), '')::integer AS voucher_no
+      FROM "expenses"
+      WHERE NULLIF(substring(trim(voucher_no) from '([0-9]+)$'), '') IS NOT NULL
+      ORDER BY id DESC
+      LIMIT 1
+    )
+    SELECT GREATEST(COALESCE((SELECT voucher_no FROM latest), 0), $1) + 1 AS voucher_no
+  `, [EXPENSE_VOUCHER_SEQUENCE_FLOOR]);
+
+  return String(result.rows[0]?.voucher_no || 1);
 }
 
 export async function safeCount(sql: string, values: unknown[] = []) {

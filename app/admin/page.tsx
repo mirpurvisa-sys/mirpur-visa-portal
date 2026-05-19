@@ -46,7 +46,7 @@ export default async function AdminDashboard() {
       <SummaryCard icon={<UsersRound size={54} />} title="Clients" lines={[`Total: ${stats.clients}`, `Today's: ${stats.todayClients}`]} href={canViewResource(user, "clients") ? "/admin/clients" : "/admin/cases"} />
       {showFinance ? <>
         <SummaryCard icon={<WalletCards size={58} />} title="Total Income" lines={[`This Month: ${money(stats.monthIncome)}`, `Today's: ${money(stats.todayIncome)}`]} href="/admin/payments?tab=income" />
-        <SummaryCard icon={<CircleDollarSign size={58} />} title="Total Expense" lines={[`This Month: ${money(stats.monthExpense)}`, `Today's: ${money(stats.todayExpense)}`]} href="/admin/payments?tab=expense" />
+        <SummaryCard icon={<CircleDollarSign size={58} />} title="Total Expense" lines={[`This Month: ${money(stats.monthExpense)}`, `Today's: ${money(stats.todayExpense)}`]} href="/admin/expenses" />
       </> : null}
       <SummaryCard icon={<BriefcaseBusiness size={56} />} title="Employees" lines={[`Total: ${stats.employees}`]} href="/admin/employees" />
     </div>

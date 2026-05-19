@@ -847,6 +847,40 @@ input, select, textarea { outline: none; }
   color: var(--mvc-blue);
 }
 .monthInput { width: 200px; }
+.financeToolbar {
+  margin: 74px 0 12px;
+}
+.financeToolbar .headerActions {
+  align-items: center;
+}
+.expenseTable {
+  min-width: 1120px;
+}
+.expenseTable .actionBtn.view {
+  color: #008a12;
+  background: #dcffe4;
+}
+.expenseModal {
+  width: min(820px, calc(100vw - 48px));
+}
+.expenseDetailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 24px 70px;
+}
+.detailPair {
+  display: grid;
+  gap: 8px;
+}
+.detailPair span {
+  color: #111827;
+  font-weight: 500;
+}
+.detailPair strong {
+  color: #747474;
+  font-size: 16px;
+  font-weight: 500;
+}
 
 .srOnly {
   position: absolute;

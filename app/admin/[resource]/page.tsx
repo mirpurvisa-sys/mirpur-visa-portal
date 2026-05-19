@@ -68,7 +68,7 @@ function ResourceTabs({ activeKey }: { activeKey: string }) {
   if (financeKeys.has(activeKey)) {
     return <div className="workflowGrid">
       <Link className={`workflowCard ${activeKey === "expenses" ? "active" : ""}`} href="/admin/expenses"><strong>Expense</strong><span>Expense records</span></Link>
-      <Link className={`workflowCard ${activeKey === "incomes" ? "active" : ""}`} href="/admin/incomes"><strong>Income</strong><span>Income records</span></Link>
+      <Link className={`workflowCard ${activeKey === "incomes" ? "active" : ""}`} href="/admin/payments?tab=income"><strong>Income</strong><span>Income records</span></Link>
     </div>;
   }
 

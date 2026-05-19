@@ -1064,7 +1064,7 @@ export const resources: Resource[] = [
       {
         "name": "voucher_no",
         "label": "Voucher No",
-        "type": "textarea",
+        "type": "text",
         "required": false,
         "requiredOnCreate": false,
         "optionalOnEdit": false

@@ -5,6 +5,7 @@ import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
+import { nextExpenseVoucherNo } from "@/lib/erp";
 import { canCreateResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     return <AccessDenied title={resource.title} message="You do not have permission to create records in this module." />;
   }
   const visibleResource = visibleResourceForUser(user, resource);
+  const defaults = resource.key === "expenses" ? { voucher_no: await nextExpenseVoucherNo() } : {};
   async function createAction(formData: FormData){
     "use server";
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
@@ -25,6 +27,7 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     if(!canCreateResource(currentUser, res)) throw new Error("You do not have permission to create this record.");
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "create"), "create");
+    if (res.key === "expenses") data.voucher_no = await nextExpenseVoucherNo();
     await delegate(res.model).create({ data });
     redirect(`/admin/${res.key}`);
   }
@@ -37,7 +40,7 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
       </div>
       <Link className="btn" href={`/admin/${resource.key}`}><ArrowLeft size={16}/> Back</Link>
     </div>
-    <ResourceForm resource={visibleResource} action={createAction} button="Create Record" />
+    <ResourceForm resource={visibleResource} action={createAction} button="Create Record" defaults={defaults} />
   </>;
 }
 

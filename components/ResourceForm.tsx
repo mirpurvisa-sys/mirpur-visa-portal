@@ -1,12 +1,12 @@
 import type { Field, Resource } from "@/lib/adminConfig";
 
-export function ResourceForm({ resource, row, action, button }: { resource: Resource; row?: any; action: any; button: string }) {
+export function ResourceForm({ resource, row, action, button, defaults = {} }: { resource: Resource; row?: any; action: any; button: string; defaults?: Record<string, any> }) {
   const mode = row ? "edit" : "create";
 
   return <form action={action} className="panel formSection">
     <div className="formGrid">
       {resource.fields.map((field) => {
-        const value = row ? row[field.name] : undefined;
+        const value = row ? row[field.name] : defaults[field.name];
         const required = mode === "create"
           ? Boolean(field.required || field.requiredOnCreate)
           : Boolean(field.required && !field.optionalOnEdit);
