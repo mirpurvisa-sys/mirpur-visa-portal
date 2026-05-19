@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
-import { dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text, today } from "@/lib/erp";
+import { dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const params = await searchParams;
   const query = textFromValue(params.q, "");
   const startCaseId = Number(params.start_case || 0);
+  const defaultDateTime = localDateTime();
+  const defaultDate = defaultDateTime.slice(0, 10);
 
   const [appointments, employees, startCaseAppointment] = await Promise.all([
     getAppointments(query),
@@ -229,8 +231,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       {canCreate ? <Link className="btn btnPrimary" href="/admin/appointments?new=appointment">New Client &amp; Appointment</Link> : null}
     </div>
 
-    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} /> : null}
-    {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} /> : null}
+    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} /> : null}
+    {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} /> : null}
 
     <section className="panel tableWrap appointmentPanel">
       <form className="legacySearch">
@@ -349,7 +351,7 @@ async function getAppointmentCaseSeed(appointmentId: number) {
   return result.rows[0] ?? null;
 }
 
-function AppointmentModal({ action, canEditAppointmentPayments }: { action: (formData: FormData) => Promise<void>; canEditAppointmentPayments: boolean }) {
+function AppointmentModal({ action, canEditAppointmentPayments, defaultDateTime }: { action: (formData: FormData) => Promise<void>; canEditAppointmentPayments: boolean; defaultDateTime: string }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal appointmentCreateModal">
       <Link className="modalClose" href="/admin/appointments" aria-label="Close">×</Link>
@@ -380,7 +382,7 @@ function AppointmentModal({ action, canEditAppointmentPayments }: { action: (for
         </div>
         <Field name="destination_country" label="Destination Country" />
         <Select name="category" label="Appointment Category" options={appointmentTypeOptions()} defaultValue="visit" />
-        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={localDateTime()} required />
+        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={defaultDateTime} required />
         {canEditAppointmentPayments ? <>
           <Select name="appointmentstatus" label="Status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
           <Field name="fee" label="Appointment Fee" type="number" defaultValue="0" required />
@@ -394,11 +396,13 @@ function AppointmentModal({ action, canEditAppointmentPayments }: { action: (for
 function StartCaseModal({
   action,
   appointment,
+  defaultDate,
   employees,
   showFinance,
 }: {
   action: (formData: FormData) => Promise<void>;
   appointment: NonNullable<Awaited<ReturnType<typeof getAppointmentCaseSeed>>>;
+  defaultDate: string;
   employees: Awaited<ReturnType<typeof employeeOptions>>;
   showFinance: boolean;
 }) {
@@ -420,7 +424,7 @@ function StartCaseModal({
           <Field name="appointment_fee" label="Paid Appointment Fee" type="number" defaultValue={appointment.fee || "0.00"} readOnly />
           <Field name="remaining_display" label="Remaining Dues" type="number" defaultValue="0.00" readOnly />
         </> : null}
-        <Field name="startDate" label="Start Date" type="date" defaultValue={today()} required />
+        <Field name="startDate" label="Start Date" type="date" defaultValue={defaultDate} required />
         <Field name="endDate" label="End Date" type="date" />
         <Field name="description" label="Description" wide />
       </div>

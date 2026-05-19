@@ -34,6 +34,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const query = textFromValue(params.q, "");
   const appointmentClientId = Number(params.appointment_for || 0);
   const viewClientId = Number(params.view_client || 0);
+  const defaultDateTime = localDateTime();
 
   const [clients, appointmentClient, viewedClient] = await Promise.all([
     getClients(query),
@@ -122,7 +123,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
 
     {params.error === "linked" ? <div className="notice errorNotice">This client already has appointments or cases, so it was not deleted.</div> : null}
     {canCreate && params.new === "client" ? <ClientModal action={createClient} /> : null}
-    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} canEditAppointmentPayments={canEditAppointmentPayments} /> : null}
+    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} /> : null}
     {viewedClient ? <ClientViewModal client={viewedClient} /> : null}
 
     <section className="panel tableWrap clientPanel">
@@ -228,10 +229,12 @@ function AppointmentForClientModal({
   action,
   client,
   canEditAppointmentPayments,
+  defaultDateTime,
 }: {
   action: (formData: FormData) => Promise<void>;
   client: DbRow;
   canEditAppointmentPayments: boolean;
+  defaultDateTime: string;
 }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal caseStartModal">
@@ -243,7 +246,7 @@ function AppointmentForClientModal({
         <Field name="name_display" label="Name" defaultValue={`${client.firstname || ""} ${client.lastname || ""}`.trim()} readOnly />
         <Field name="phone_display" label="Phone Number" defaultValue={client.phone} readOnly />
         <Select name="category" label="Appointment Category" options={appointmentTypeOptions()} defaultValue="visit" />
-        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={localDateTime()} required />
+        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={defaultDateTime} required />
         {canEditAppointmentPayments ? <>
           <Select name="appointmentstatus" label="Status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
           <Field name="fee" label="Appointment Fee" type="number" defaultValue="0" required />

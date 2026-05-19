@@ -1,0 +1,86 @@
+id,client_case_id,document,document_type,expected_storage_path,created_at
+1378,206,"Business.rar",rar,"uploads/docs/Business.rar",2021-12-01T22:06:45
+1379,206,"Personal.rar",rar,"uploads/docs/Personal.rar",2021-12-01T22:09:09
+1380,206,"rxtra.rar",rar,"uploads/docs/rxtra.rar",2021-12-01T22:09:28
+1437,246,"Bank Statment (2).jpg",jpg,"uploads/docs/Bank Statment (2).jpg",2021-12-17T15:00:41
+1438,246,"Bank Statment (3).jpg",jpg,"uploads/docs/Bank Statment (3).jpg",2021-12-17T15:00:41
+1440,246,"Bank Statment (5).jpg",jpg,"uploads/docs/Bank Statment (5).jpg",2021-12-17T15:00:41
+1441,246,"Bank Statment (6).jpg",jpg,"uploads/docs/Bank Statment (6).jpg",2021-12-17T15:00:41
+1442,246,"Bank Statment (7).jpg",jpg,"uploads/docs/Bank Statment (7).jpg",2021-12-17T15:00:41
+1443,246,"Bank Statment (8).jpg",jpg,"uploads/docs/Bank Statment (8).jpg",2021-12-17T15:00:41
+1444,246,"Bank Statment (9).jpg",jpg,"uploads/docs/Bank Statment (9).jpg",2021-12-17T15:00:41
+1445,246,"Bank Statment (10).jpg",jpg,"uploads/docs/Bank Statment (10).jpg",2021-12-17T15:00:41
+1446,246,"Bank Statment (11).jpg",jpg,"uploads/docs/Bank Statment (11).jpg",2021-12-17T15:00:41
+1447,246,"Bank Statment (12).jpg",jpg,"uploads/docs/Bank Statment (12).jpg",2021-12-17T15:00:41
+1448,246,"Bank Statment (13).jpg",jpg,"uploads/docs/Bank Statment (13).jpg",2021-12-17T15:00:41
+1449,246,"Bank Statment (14).jpg",jpg,"uploads/docs/Bank Statment (14).jpg",2021-12-17T15:00:41
+1450,246,"Bank Statment (15).jpg",jpg,"uploads/docs/Bank Statment (15).jpg",2021-12-17T15:00:41
+1550,247,"Bank Statment (2).jpg",jpg,"uploads/docs/Bank Statment (2).jpg",2021-12-17T15:15:49
+1551,247,"Bank Statment (3).jpg",jpg,"uploads/docs/Bank Statment (3).jpg",2021-12-17T15:15:49
+1553,247,"Bank Statment (5).jpg",jpg,"uploads/docs/Bank Statment (5).jpg",2021-12-17T15:15:49
+1554,247,"Bank Statment (6).jpg",jpg,"uploads/docs/Bank Statment (6).jpg",2021-12-17T15:15:49
+1555,247,"Bank Statment (7).jpg",jpg,"uploads/docs/Bank Statment (7).jpg",2021-12-17T15:15:49
+1556,247,"Bank Statment (8).jpg",jpg,"uploads/docs/Bank Statment (8).jpg",2021-12-17T15:15:49
+1557,247,"Bank Statment (9).jpg",jpg,"uploads/docs/Bank Statment (9).jpg",2021-12-17T15:15:49
+1558,247,"Bank Statment (10).jpg",jpg,"uploads/docs/Bank Statment (10).jpg",2021-12-17T15:15:49
+1559,247,"Bank Statment (11).jpg",jpg,"uploads/docs/Bank Statment (11).jpg",2021-12-17T15:15:49
+1560,247,"Bank Statment (12).jpg",jpg,"uploads/docs/Bank Statment (12).jpg",2021-12-17T15:15:49
+1561,247,"Bank Statment (13).jpg",jpg,"uploads/docs/Bank Statment (13).jpg",2021-12-17T15:15:49
+1562,247,"Bank Statment (14).jpg",jpg,"uploads/docs/Bank Statment (14).jpg",2021-12-17T15:15:49
+1563,247,"Bank Statment (15).jpg",jpg,"uploads/docs/Bank Statment (15).jpg",2021-12-17T15:15:49
+1787,192,"Death Certificate.jpg",jpg,"uploads/docs/Death Certificate.jpg",2021-12-21T10:01:33
+1788,192,"FRC (2).jpg",jpg,"uploads/docs/FRC (2).jpg",2021-12-21T10:01:33
+1860,255,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2021-12-22T15:06:55
+1861,255,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2021-12-22T15:06:55
+1862,255,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2021-12-22T15:06:55
+1863,255,"Passport (7).jpg",jpg,"uploads/docs/Passport (7).jpg",2021-12-22T15:06:55
+1864,255,"Passport (8).jpg",jpg,"uploads/docs/Passport (8).jpg",2021-12-22T15:06:55
+1865,255,"Passport (9).jpg",jpg,"uploads/docs/Passport (9).jpg",2021-12-22T15:06:55
+1866,255,"Passport (10).jpg",jpg,"uploads/docs/Passport (10).jpg",2021-12-22T15:06:55
+1867,255,"Passport (11).jpg",jpg,"uploads/docs/Passport (11).jpg",2021-12-22T15:06:55
+2004,164,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2021-12-28T17:49:48
+2005,164,"Sponsorship.jpg",jpg,"uploads/docs/Sponsorship.jpg",2021-12-28T17:49:48
+2044,267,"Property Document (1).jpg",jpg,"uploads/docs/Property Document (1).jpg",2022-01-03T16:13:00
+2045,267,"Property Document (2).jpg",jpg,"uploads/docs/Property Document (2).jpg",2022-01-03T16:13:00
+2061,268,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2022-01-03T16:16:58
+2062,268,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2022-01-03T16:16:58
+2063,268,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2022-01-03T16:16:58
+2113,272,"ID.jpg",jpg,"uploads/docs/ID.jpg",2022-01-10T11:25:49
+2114,272,"Income Tax.jpg",jpg,"uploads/docs/Income Tax.jpg",2022-01-10T11:25:49
+2134,272,"Sponsor.jpg",jpg,"uploads/docs/Sponsor.jpg",2022-01-10T11:26:33
+2216,279,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2022-01-12T17:16:35
+2217,279,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2022-01-12T17:16:35
+2218,279,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2022-01-12T17:16:35
+2219,279,"Passport (7).jpg",jpg,"uploads/docs/Passport (7).jpg",2022-01-12T17:16:35
+2220,279,"Passport (8).jpg",jpg,"uploads/docs/Passport (8).jpg",2022-01-12T17:16:35
+2221,279,"Passport (9).jpg",jpg,"uploads/docs/Passport (9).jpg",2022-01-12T17:16:35
+2222,279,"Passport (10).jpg",jpg,"uploads/docs/Passport (10).jpg",2022-01-12T17:16:35
+2223,279,"Passport (11).jpg",jpg,"uploads/docs/Passport (11).jpg",2022-01-12T17:16:35
+2253,281,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2022-01-13T09:28:21
+2254,281,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2022-01-13T09:28:21
+2265,281,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2022-01-13T09:39:21
+2266,281,"Passport (7).jpg",jpg,"uploads/docs/Passport (7).jpg",2022-01-13T09:39:21
+2267,281,"Passport (8).jpg",jpg,"uploads/docs/Passport (8).jpg",2022-01-13T09:39:21
+2268,281,"Passport (9).jpg",jpg,"uploads/docs/Passport (9).jpg",2022-01-13T09:39:21
+2269,281,"Passport (10).jpg",jpg,"uploads/docs/Passport (10).jpg",2022-01-13T09:39:21
+2270,281,"Passport (11).jpg",jpg,"uploads/docs/Passport (11).jpg",2022-01-13T09:39:21
+2281,243,"FRC (1).jpg",jpg,"uploads/docs/FRC (1).jpg",2022-01-13T15:41:36
+2282,243,"FRC (2).jpg",jpg,"uploads/docs/FRC (2).jpg",2022-01-13T15:41:36
+2368,285,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2022-01-15T13:24:29
+2369,285,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2022-01-15T13:24:29
+2370,285,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2022-01-15T13:24:29
+2371,285,"Passport (7).jpg",jpg,"uploads/docs/Passport (7).jpg",2022-01-15T13:24:29
+2372,285,"Passport (8).jpg",jpg,"uploads/docs/Passport (8).jpg",2022-01-15T13:24:29
+2467,292,"Birth Registeration Certificate (1).jpg",jpg,"uploads/docs/Birth Registeration Certificate (1).jpg",2022-01-20T12:17:14
+2468,292,"Birth Registeration Certificate (2).jpg",jpg,"uploads/docs/Birth Registeration Certificate (2).jpg",2022-01-20T12:17:14
+2472,292,"FRC (1).jpg",jpg,"uploads/docs/FRC (1).jpg",2022-01-20T12:17:14
+2473,292,"FRC (2).jpg",jpg,"uploads/docs/FRC (2).jpg",2022-01-20T12:17:14
+2525,298,"Account Statement.jpg",jpg,"uploads/docs/Account Statement.jpg",2022-01-21T16:25:18
+2541,298,"Passport (4).jpg",jpg,"uploads/docs/Passport (4).jpg",2022-01-21T16:26:58
+2542,298,"Passport (5).jpg",jpg,"uploads/docs/Passport (5).jpg",2022-01-21T16:26:58
+2543,298,"Passport (6).jpg",jpg,"uploads/docs/Passport (6).jpg",2022-01-21T16:26:58
+2544,298,"Passport (7).jpg",jpg,"uploads/docs/Passport (7).jpg",2022-01-21T16:26:58
+2545,298,"Passport (8).jpg",jpg,"uploads/docs/Passport (8).jpg",2022-01-21T16:26:58
+2546,298,"Passport (9).jpg",jpg,"uploads/docs/Passport (9).jpg",2022-01-21T16:26:58
+2547,298,"Passport (10).jpg",jpg,"uploads/docs/Passport (10).jpg",2022-01-21T16:26:58
+2548,298,"Passport (11).jpg",jpg,"uploads/docs/Passport (11).jpg",2022-01-21T16:26:58

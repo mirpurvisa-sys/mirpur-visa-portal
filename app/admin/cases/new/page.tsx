@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
-import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text, today } from "@/lib/erp";
+import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,8 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
   const resource = getResource("cases");
   if (!canViewResource(user, "cases") || !resource || !canCreateResource(user, resource)) return <AccessDenied />;
   const showFinance = canViewFinance(user);
+  const defaultDateTime = localDateTime();
+  const defaultDate = defaultDateTime.slice(0, 10);
 
   const params = await searchParams;
   const appointmentId = Number(params.appointment_id || 0);
@@ -202,7 +204,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
           <EmployeeSelect employees={employees} />
           <Field name="caseCategory" label="Case category" defaultValue={appointment?.visa_category || "Consultation"} required />
           <Select name="status" label="Status" options={["Open", "In Process", "Pending", "Completed", "Closed"]} />
-          <Field name="startDate" label="Start date" type="date" defaultValue={today()} required />
+          <Field name="startDate" label="Start date" type="date" defaultValue={defaultDate} required />
           <Field name="endDate" label="End date" type="date" />
           <Field name="submitted_on" label="Submitted on" type="date" />
           <Field name="travel_dates" label="Travel dates" />
@@ -214,7 +216,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
             <Select name="appointmentstatus" label="Payment status" options={["Paid", "Unpaid"]} defaultValue={appointment?.appointmentstatus || "Unpaid"} />
           </> : null}
           <Select name="appointment_category" label="Appointment type" options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} defaultValue={appointment?.category || "visit"} />
-          <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(appointment?.appointmentdate) || localDateTime()} required />
+          <Field name="appointmentdate" label="Appointment date" type="datetime-local" defaultValue={dateTimeInput(appointment?.appointmentdate) || defaultDateTime} required />
           <Field name="documents_note" label="Document notes" wide />
           <Textarea name="description" label="Case description" />
         </div>
@@ -229,7 +231,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         <h2>First Installment</h2>
         <div className="formGrid">
           <Field name="installment_name" label="Installment name" defaultValue="Initial payment" />
-          <Field name="installment_time" label="Installment time" type="datetime-local" defaultValue={localDateTime()} />
+          <Field name="installment_time" label="Installment time" type="datetime-local" defaultValue={defaultDateTime} />
         </div>
       </section> : null}
 

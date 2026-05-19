@@ -1492,9 +1492,126 @@ input, select, textarea { outline: none; }
   color: #ed1c2e;
 }
 .attachmentsTitle {
-  margin: 30px 12px 58px;
+  margin: 0;
   color: var(--mvc-yellow);
   font-size: 18px;
+}
+.attachmentsPanel {
+  display: grid;
+  gap: 14px;
+  margin: 30px 12px 48px;
+}
+.attachmentsHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.attachmentsHeader p {
+  margin: 6px 0 0;
+  color: var(--mvc-muted);
+  font-size: 14px;
+}
+.attachmentsHeader > span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  color: var(--mvc-blue);
+  background: #eaf6fc;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.documentUploadForm {
+  display: grid;
+  grid-template-columns: minmax(185px, 240px) minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #d9dee5;
+  border-radius: 6px;
+}
+.documentUploadForm > label {
+  display: grid;
+  gap: 7px;
+  color: #202a36;
+  font-weight: 600;
+}
+.documentFilePicker {
+  min-height: 74px;
+  display: grid !important;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 4px 10px !important;
+  align-items: center;
+  padding: 12px;
+  border: 1px dashed #b8c3cf;
+  border-radius: 6px;
+  background: #f8fbfd;
+  color: var(--mvc-blue);
+}
+.documentFilePicker input {
+  grid-column: 1 / -1;
+  width: 100%;
+  color: #526071;
+  font-size: 14px;
+}
+.documentFilePicker span {
+  color: #2b3745;
+}
+.documentList {
+  display: grid;
+  gap: 10px;
+}
+.documentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #d9dee5;
+  border-radius: 6px;
+}
+.documentInfo {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.documentInfo > span {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: var(--mvc-blue);
+  background: #eaf6fc;
+  border-radius: 999px;
+}
+.documentInfo strong {
+  display: block;
+  color: #101827;
+  overflow-wrap: anywhere;
+}
+.documentInfo small {
+  display: block;
+  margin-top: 3px;
+  color: var(--mvc-muted);
+}
+.documentActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.documentEmpty {
+  padding: 18px;
+  color: var(--mvc-muted);
+  background: #fff;
+  border: 1px dashed #cbd4de;
+  border-radius: 6px;
 }
 .familyHeader {
   display: flex;
@@ -1801,6 +1918,9 @@ input, select, textarea { outline: none; }
   .mvcMain { margin-left: 0; padding: 24px 14px 36px; }
   .summaryGrid, .lowerGrid, .employeeGrid, .profileHero { grid-template-columns: 1fr; }
   .summaryCard { grid-template-columns: 78px 1fr; min-height: 150px; }
-  .formGrid, .formGrid.single, .filterBar, .inlineForm, .workspaceGrid { grid-template-columns: 1fr; }
+  .formGrid, .formGrid.single, .filterBar, .inlineForm, .workspaceGrid, .documentUploadForm { grid-template-columns: 1fr; }
   .erpHeader, .appointmentItem { display: grid; }
+  .attachmentsHeader, .documentItem, .documentActions { align-items: flex-start; }
+  .attachmentsHeader, .documentItem { display: grid; }
+  .documentActions { flex-wrap: wrap; }
 }

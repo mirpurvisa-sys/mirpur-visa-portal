@@ -1,13 +1,16 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
-import { MapPin, Trash2 } from "lucide-react";
+import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { createCaseDocumentSignedUrl, deleteCaseDocumentFromStorage, storagePathFromDocumentValue, uploadCaseDocumentToStorage } from "@/lib/supabaseStorage";
 
 export const dynamic = "force-dynamic";
+const MAX_CASE_DOCUMENT_SIZE = 20 * 1024 * 1024;
 
 export default async function CaseWorkspace({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ mode?: string }> }) {
   const { id } = await params;
@@ -22,12 +25,14 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   const canDelete = resource ? canDeleteResource(user, resource) : false;
   const showFinance = canViewFinance(user);
 
-  const [caseRow, installments, employees] = await Promise.all([
+  const [caseRow, installments, employees, documents] = await Promise.all([
     getCase(caseId),
     showFinance ? getInstallments(caseId) : Promise.resolve([]),
     employeeOptions(),
+    getCaseDocuments(caseId),
   ]);
   if (!caseRow) notFound();
+  const documentReturnPath = `/admin/cases/${caseId}${sp.mode === "edit" ? "?mode=edit" : ""}#attachments`;
 
   async function updateClient(formData: FormData) {
     "use server";
@@ -178,6 +183,52 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     redirect("/admin/cases");
   }
 
+  async function uploadDocuments(formData: FormData) {
+    "use server";
+    const currentUser = await requireUser();
+    const currentResource = getResource("cases");
+    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to upload case documents.");
+
+    const uploadedFiles = formData.getAll("documents").filter(isUploadedFile);
+    if (!uploadedFiles.length) throw new Error("Please choose at least one document to upload.");
+
+    const documentType = text(formData, "document_type", "Client Document");
+    const db = getDb();
+
+    for (const file of uploadedFiles) {
+      if (file.size > MAX_CASE_DOCUMENT_SIZE) throw new Error(`${file.name} is larger than 20MB.`);
+      const uploaded = await uploadCaseDocumentToStorage(caseId, file);
+      await db.query(
+        `INSERT INTO "documents" (client_case_id, document, document_type, created_at, updated_at) VALUES ($1,$2,$3,NOW(),NOW())`,
+        [caseId, uploaded.path, documentType],
+      );
+    }
+
+    revalidatePath(`/admin/cases/${caseId}`);
+    redirect(documentReturnPath);
+  }
+
+  async function deleteDocument(formData: FormData) {
+    "use server";
+    const currentUser = await requireUser();
+    const currentResource = getResource("cases");
+    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to delete case documents.");
+
+    const documentId = Number(formData.get("document_id"));
+    if (!Number.isFinite(documentId)) throw new Error("Invalid document.");
+
+    const db = getDb();
+    const result = await db.query(`SELECT id, document FROM "documents" WHERE id=$1 AND client_case_id=$2 LIMIT 1`, [documentId, caseId]);
+    const document = result.rows[0];
+    if (!document) throw new Error("Document not found.");
+
+    const storagePath = storagePathFromDocumentValue(document.document);
+    if (storagePath) await deleteCaseDocumentFromStorage(storagePath);
+    await db.query(`DELETE FROM "documents" WHERE id=$1 AND client_case_id=$2`, [documentId, caseId]);
+    revalidatePath(`/admin/cases/${caseId}`);
+    redirect(documentReturnPath);
+  }
+
   const isEdit = sp.mode === "edit" && canEdit;
   const paid = Number(caseRow.total_paid || 0);
   const total = Number(caseRow.total || 0);
@@ -285,10 +336,8 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <div><label><input form={formId} type="radio" name="docs" value="Pending" defaultChecked={String(caseRow.docs || "Pending") === "Pending"} /> Pending</label> <label><input form={formId} type="radio" name="docs" value="Completed" defaultChecked={String(caseRow.docs || "") === "Completed"} /> Completed</label></div>
           <label>Documents Note</label>
           <input form={formId} className="input" name="documents_note" defaultValue={stringValue(caseRow.documents_note)} />
-          <label>Attach New Documents</label>
-          <input className="fileInput" type="file" multiple />
-          <div className="fakeProgress"><span>0%</span></div>
         </div>
+        <CaseDocumentsSection documents={documents} canManage={canEdit} uploadAction={uploadDocuments} deleteAction={deleteDocument} />
         <button form={formId} className="btn btnPrimary">Update</button>
       </> : <>
         <div className="caseFactsGrid">
@@ -316,7 +365,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
             <td>{yesNo(caseRow.business_documents)}</td>
           </tr></tbody>
         </table>
-        <h3 className="attachmentsTitle">Attachments</h3>
+        <CaseDocumentsSection documents={documents} canManage={canEdit} uploadAction={uploadDocuments} deleteAction={deleteDocument} />
         <div className="familyHeader"><h3>Family Details</h3><button className="btn btnPrimary" type="button">Add Member</button></div>
         <div className="panel tableWrap familyPanel"><table className="table dataTable"><thead><tr><th>Photo</th><th>Full Name</th><th>Phone</th><th>Relation</th><th>Destination Country</th><th>Action</th><th>Make Client</th></tr></thead><tbody /></table></div>
       </>}
@@ -348,6 +397,105 @@ async function getCase(caseId: number) {
 async function getInstallments(caseId: number) {
   const result = await getDb().query(`SELECT id, name, amount, time FROM "case_installments" WHERE client_case_id=$1 ORDER BY time DESC, id DESC`, [caseId]);
   return result.rows;
+}
+
+async function getCaseDocuments(caseId: number) {
+  const result = await getDb().query(
+    `SELECT id, document, document_type, created_at FROM "documents" WHERE client_case_id=$1 ORDER BY created_at DESC NULLS LAST, id DESC`,
+    [caseId],
+  );
+
+  return Promise.all(result.rows.map(async (document) => ({
+    ...document,
+    href: await getDocumentHref(document.document),
+  })));
+}
+
+async function getDocumentHref(value: unknown) {
+  const document = stringValue(value).trim();
+  if (!document) return "";
+  const storagePath = storagePathFromDocumentValue(document);
+
+  if (storagePath) {
+    try {
+      return await createCaseDocumentSignedUrl(storagePath);
+    } catch {
+      return "";
+    }
+  }
+
+  if (document.startsWith("http://") || document.startsWith("https://") || document.startsWith("/")) return document;
+  return "";
+}
+
+function CaseDocumentsSection({
+  canManage,
+  deleteAction,
+  documents,
+  uploadAction,
+}: {
+  canManage: boolean;
+  deleteAction: (formData: FormData) => void;
+  documents: Awaited<ReturnType<typeof getCaseDocuments>>;
+  uploadAction: (formData: FormData) => void;
+}) {
+  return <section className="attachmentsPanel" id="attachments">
+    <div className="attachmentsHeader">
+      <div>
+        <h3 className="attachmentsTitle">Attachments</h3>
+        <p>Upload passports, forms, receipts, pictures, PDFs, and other client files.</p>
+      </div>
+      <span>{documents.length} file{documents.length === 1 ? "" : "s"}</span>
+    </div>
+
+    {canManage ? <form action={uploadAction} className="documentUploadForm" encType="multipart/form-data">
+      <label>
+        Document Type
+        <select className="input" name="document_type" defaultValue="Client Document">
+          <option>Client Document</option>
+          <option>Passport</option>
+          <option>CNIC</option>
+          <option>Visa Form</option>
+          <option>Payment Receipt</option>
+          <option>Supporting Evidence</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label className="documentFilePicker">
+        <UploadCloud size={24} />
+        <span>Choose files from computer or mobile</span>
+        <input
+          name="documents"
+          type="file"
+          multiple
+          required
+          accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"
+        />
+      </label>
+      <button className="btn btnPrimary" type="submit">Upload</button>
+    </form> : null}
+
+    <div className="documentList">
+      {documents.length ? documents.map((document) => (
+        <article className="documentItem" key={document.id}>
+          <div className="documentInfo">
+            <span><FileText size={20} /></span>
+            <div>
+              <strong>{documentDisplayName(document.document)}</strong>
+              <small>{document.document_type || "Client Document"} · {formatFileDate(document.created_at)}</small>
+            </div>
+          </div>
+          <div className="documentActions">
+            {document.href ? <a className="btn" href={document.href} target="_blank" rel="noreferrer"><Download size={16} /> Open</a> : <span className="muted">Link unavailable</span>}
+            {canManage ? <form action={deleteAction}>
+              <input type="hidden" name="document_id" value={document.id} />
+              <button className="actionBtn delete" type="submit" aria-label="Delete document"><Trash2 size={16} /></button>
+            </form> : null}
+          </div>
+        </article>
+      )) : <div className="documentEmpty">No documents uploaded for this case yet.</div>}
+    </div>
+  </section>;
 }
 
 function Field({ name, label, type = "text", defaultValue, disabled, required, wide, readOnly, formId }: { name: string; label: string; type?: string; defaultValue?: unknown; disabled?: boolean; required?: boolean; wide?: boolean; readOnly?: boolean; formId?: string }) {
@@ -414,6 +562,31 @@ function formatStatus(value: unknown) {
 function textFromValue(value: unknown, fallback: string) {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
+}
+
+function isUploadedFile(value: FormDataEntryValue): value is File {
+  return typeof value === "object" && value !== null && "arrayBuffer" in value && "name" in value && "size" in value;
+}
+
+function documentDisplayName(value: unknown) {
+  const document = stringValue(value).trim();
+  const rawName = decodeFileName(document.split(/[?#]/, 1)[0].replace(/\\/g, "/").split("/").pop() || "Document");
+  return rawName.replace(/^\d+-[a-f0-9]{8}-/i, "") || "Document";
+}
+
+function decodeFileName(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function formatFileDate(value: unknown) {
+  if (!value) return "No date";
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function dateInput(value: unknown) {
