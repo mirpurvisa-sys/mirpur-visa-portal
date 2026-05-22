@@ -6,6 +6,7 @@ import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/perm
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { dateValue, money, nullableText, numberValue, text, today } from "@/lib/erp";
+import { getReceivedIncomeTotal } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -126,9 +127,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
 }
 
 async function getPaymentStats() {
-  const result = await getDb().query(`SELECT COALESCE(SUM("Amount"), 0) AS income FROM "incomes"`);
-  const row = result.rows[0] || {};
-  return { income: Number(row.income || 0) };
+  return { income: await getReceivedIncomeTotal() };
 }
 
 async function getTransactions() {

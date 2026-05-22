@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { APP_TIME_ZONE } from "./finance";
 
 const EXPENSE_VOUCHER_SEQUENCE_FLOOR = 4694;
 
@@ -48,12 +49,33 @@ export function money(value: unknown) {
 }
 
 export function today() {
-  return new Date().toISOString().slice(0, 10);
+  const { year, month, day } = datePartsInAppTime();
+  return `${year}-${month}-${day}`;
 }
 
 export function localDateTime(date = new Date()) {
-  const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  const { year, month, day, hour, minute } = datePartsInAppTime(date);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function datePartsInAppTime(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: values.year || "1970",
+    month: values.month || "01",
+    day: values.day || "01",
+    hour: values.hour || "00",
+    minute: values.minute || "00",
+  };
 }
 
 export async function employeeOptions(): Promise<SelectOption[]> {

@@ -6,6 +6,7 @@ import { getResource } from "@/lib/adminConfig";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
+import { APP_TODAY_SQL, RECEIVED_INCOME_CTE } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -189,7 +190,7 @@ async function getDashboardStats(includeFinance: boolean) {
   const result = await getDb().query(`
     SELECT
       (SELECT COUNT(*)::int FROM "clients") AS clients,
-      (SELECT COUNT(*)::int FROM "clients" WHERE created_at::date = CURRENT_DATE) AS today_clients,
+      (SELECT COUNT(*)::int FROM "clients" WHERE created_at::date = ${APP_TODAY_SQL}) AS today_clients,
       (SELECT COUNT(*)::int FROM "employees") AS employees
   `);
   const base = result.rows[0] || {};
@@ -198,48 +199,12 @@ async function getDashboardStats(includeFinance: boolean) {
   }
 
   const finance = await getDb().query(`
-    WITH paid_appointments AS (
-      SELECT
-        a.id,
-        a.client_id,
-        a.fee,
-        a.appointmentdate,
-        trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))) AS client_name
-      FROM "appointments" a
-      JOIN "clients" c ON c.id = a.client_id
-      WHERE regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
-        AND COALESCE(a.fee, 0) > 0
-    ),
-    unsynced_appointment_income AS (
-      SELECT *
-      FROM paid_appointments a
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM "incomes" i
-        WHERE i."IncomesType" ILIKE 'Appointment%'
-          AND (
-            i.foreign_id = a.id::text
-            OR i.foreign_id = a.id::text || a.client_id::text
-            OR i.foreign_id LIKE (a.id::text || a.client_id::text || '%')
-            OR (
-              COALESCE(i."Title", '') = a.client_name
-              AND COALESCE(i."Amount", 0) = COALESCE(a.fee, 0)
-              AND i."Date" = a.appointmentdate::date
-            )
-          )
-      )
-    )
+    WITH ${RECEIVED_INCOME_CTE}
     SELECT
-      (
-        (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE date_trunc('month', "Date") = date_trunc('month', CURRENT_DATE))
-        + (SELECT COALESCE(SUM(fee), 0) FROM unsynced_appointment_income WHERE date_trunc('month', appointmentdate) = date_trunc('month', CURRENT_DATE))
-      ) AS month_income,
-      (
-        (SELECT COALESCE(SUM("Amount"), 0) FROM "incomes" WHERE "Date"::date = CURRENT_DATE)
-        + (SELECT COALESCE(SUM(fee), 0) FROM unsynced_appointment_income WHERE appointmentdate::date = CURRENT_DATE)
-      ) AS today_income,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE date_trunc('month', "Date") = date_trunc('month', CURRENT_DATE)) AS month_expense,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE "Date"::date = CURRENT_DATE) AS today_expense
+      (SELECT COALESCE(SUM(amount), 0) FROM received_income WHERE date_trunc('month', received_on) = date_trunc('month', ${APP_TODAY_SQL})) AS month_income,
+      (SELECT COALESCE(SUM(amount), 0) FROM received_income WHERE received_on = ${APP_TODAY_SQL}) AS today_income,
+      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE date_trunc('month', "Date") = date_trunc('month', ${APP_TODAY_SQL})) AS month_expense,
+      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE "Date"::date = ${APP_TODAY_SQL}) AS today_expense
   `);
   const row = finance.rows[0] || {};
   return {
@@ -255,66 +220,33 @@ async function getDashboardStats(includeFinance: boolean) {
 
 async function getMoneyTrail(): Promise<MoneyPoint[]> {
   const result = await getDb().query(`
-    WITH months AS (
+    WITH ${RECEIVED_INCOME_CTE},
+    months AS (
       SELECT generate_series(
-        date_trunc('month', CURRENT_DATE) - interval '4 months',
-        date_trunc('month', CURRENT_DATE),
+        date_trunc('month', ${APP_TODAY_SQL}) - interval '4 months',
+        date_trunc('month', ${APP_TODAY_SQL}),
         interval '1 month'
       )::date AS month
     ),
     income AS (
-      SELECT date_trunc('month', "Date")::date AS month, COALESCE(SUM("Amount"), 0) AS amount
-      FROM "incomes"
-      WHERE "Date" >= date_trunc('month', CURRENT_DATE) - interval '4 months'
-      GROUP BY 1
-    ),
-    paid_appointments AS (
-      SELECT
-        a.id,
-        a.client_id,
-        a.fee,
-        a.appointmentdate,
-        trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))) AS client_name
-      FROM "appointments" a
-      JOIN "clients" c ON c.id = a.client_id
-      WHERE regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
-        AND COALESCE(a.fee, 0) > 0
-    ),
-    appointment_income AS (
-      SELECT date_trunc('month', appointmentdate)::date AS month, COALESCE(SUM(fee), 0) AS amount
-      FROM paid_appointments a
-      WHERE appointmentdate >= date_trunc('month', CURRENT_DATE) - interval '4 months'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM "incomes" i
-          WHERE i."IncomesType" ILIKE 'Appointment%'
-            AND (
-              i.foreign_id = a.id::text
-              OR i.foreign_id = a.id::text || a.client_id::text
-              OR i.foreign_id LIKE (a.id::text || a.client_id::text || '%')
-              OR (
-                COALESCE(i."Title", '') = a.client_name
-                AND COALESCE(i."Amount", 0) = COALESCE(a.fee, 0)
-                AND i."Date" = a.appointmentdate::date
-              )
-            )
-        )
+      SELECT date_trunc('month', received_on)::date AS month, COALESCE(SUM(amount), 0) AS amount
+      FROM received_income
+      WHERE received_on >= date_trunc('month', ${APP_TODAY_SQL}) - interval '4 months'
       GROUP BY 1
     ),
     expense AS (
       SELECT date_trunc('month', "Date")::date AS month, COALESCE(SUM("Amount"), 0) AS amount
       FROM "expenses"
-      WHERE "Date" >= date_trunc('month', CURRENT_DATE) - interval '4 months'
+      WHERE "Date" >= date_trunc('month', ${APP_TODAY_SQL}) - interval '4 months'
       GROUP BY 1
     )
     SELECT
       to_char(m.month, 'YYYY-MM') AS month,
       to_char(m.month, 'FMMonth-YYYY') AS label,
-      COALESCE(income.amount, 0) + COALESCE(appointment_income.amount, 0) AS income,
+      COALESCE(income.amount, 0) AS income,
       COALESCE(expense.amount, 0) AS expense
     FROM months m
     LEFT JOIN income ON income.month = m.month
-    LEFT JOIN appointment_income ON appointment_income.month = m.month
     LEFT JOIN expense ON expense.month = m.month
     ORDER BY m.month ASC
   `);
@@ -331,7 +263,7 @@ async function getTodayActivities(): Promise<DashboardItem[]> {
   const result = await getDb().query(`
     SELECT id, title, category, priority, description, date_time
     FROM "daily_activities"
-    WHERE date_time::date = CURRENT_DATE OR created_at::date = CURRENT_DATE
+    WHERE date_time::date = ${APP_TODAY_SQL} OR created_at::date = ${APP_TODAY_SQL}
     ORDER BY date_time ASC NULLS LAST, id DESC
     LIMIT 5
   `);
