@@ -56,13 +56,13 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       <div>
         <div className="eyebrow">Finance</div>
         <h1>Income</h1>
-        <p>Track appointment, service, and case income.</p>
+        <p>Track received appointment, service, and case income.</p>
       </div>
       {canCreateIncome ? <a className="btn btnPrimary" href="#add-transaction"><Plus size={16}/> Add New Income</a> : null}
     </div>
 
     <div className="moneyToolbar">
-      <strong>Total: <span>{money(stats.income)}</span></strong>
+      <strong>Collected Total: <span>{money(stats.income)}</span></strong>
       <div className="headerActions">
         <button className="btn btnYellow" type="button">Date Range</button>
         <input className="input monthInput" type="month" defaultValue={today().slice(0, 7)} aria-label="Date range month" />

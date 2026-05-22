@@ -48,6 +48,10 @@ export function money(value: unknown) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "PKR", maximumFractionDigits: 0 }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+export function isPaidStatus(value: unknown) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "") === "paid";
+}
+
 export function today() {
   const { year, month, day } = datePartsInAppTime();
   return `${year}-${month}-${day}`;
@@ -111,11 +115,44 @@ export async function clientOptions(): Promise<SelectOption[]> {
 export async function syncCaseTotals(caseId: number) {
   await getDb().query(
     `
-      WITH totals AS (
+      WITH case_row AS (
+        SELECT id, total, appointment_id
+        FROM "client_cases"
+        WHERE id = $1
+      ),
+      installment_totals AS (
         SELECT
           COALESCE(SUM(NULLIF(regexp_replace(amount, '[^0-9.-]', '', 'g'), '')::numeric), 0) AS paid
         FROM "case_installments"
+        JOIN case_row ON case_row.id = "case_installments".client_case_id
+        LEFT JOIN "appointments" a ON a.id = case_row.appointment_id
         WHERE client_case_id = $1
+          AND NOT (
+            "case_installments".name ILIKE 'Appointment%'
+            AND regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') <> 'paid'
+          )
+      ),
+      paid_appointment AS (
+        SELECT
+          CASE
+            WHEN regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
+              AND COALESCE(a.fee, 0) > 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM "case_installments" ci
+                WHERE ci.client_case_id = case_row.id
+                  AND ci.name ILIKE 'Appointment%'
+                  AND COALESCE(NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric, 0) = COALESCE(a.fee, 0)
+              )
+            THEN COALESCE(a.fee, 0)
+            ELSE 0
+          END AS paid
+        FROM case_row
+        LEFT JOIN "appointments" a ON a.id = case_row.appointment_id
+      ),
+      totals AS (
+        SELECT installment_totals.paid + paid_appointment.paid AS paid
+        FROM installment_totals, paid_appointment
       )
       UPDATE "client_cases"
       SET

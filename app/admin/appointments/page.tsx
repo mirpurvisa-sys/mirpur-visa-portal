@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
-import { dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
@@ -157,7 +157,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const total = currentCanViewFinance ? numberValue(formData, "total") : 0;
     const advance = currentCanViewFinance ? numberValue(formData, "advance") : 0;
     const appointmentFee = currentCanViewFinance ? numberValue(formData, "appointment_fee") : Number(seed.fee || 0);
-    const totalPaid = appointmentFee + advance;
+    const receivedAppointmentFee = isPaidStatus(seed.appointmentstatus) ? appointmentFee : 0;
+    const totalPaid = receivedAppointmentFee + advance;
     const clientName = `${seed.firstname || ""} ${seed.lastname || ""}`.trim();
     const now = new Date();
     const db = getDb();
@@ -204,10 +205,12 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     );
 
     const caseId = Number(caseResult.rows[0].id);
-    await db.query(
-      `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
-      [caseId, "Appointment Fee", String(appointmentFee), dateTimeInput(seed.appointmentdate) || localDateTime(), now],
-    );
+    if (receivedAppointmentFee > 0) {
+      await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+        [caseId, "Appointment Fee", String(receivedAppointmentFee), dateTimeInput(seed.appointmentdate) || localDateTime(), now],
+      );
+    }
 
     if (advance > 0) {
       await db.query(
@@ -421,7 +424,8 @@ function StartCaseModal({
         {showFinance ? <>
           <Field name="total" label="Total Payment" type="number" required />
           <Field name="advance" label="Advance Payment" type="number" defaultValue="0" required />
-          <Field name="appointment_fee" label="Paid Appointment Fee" type="number" defaultValue={appointment.fee || "0.00"} readOnly />
+          <Field name="appointment_fee" label="Appointment Fee" type="number" defaultValue={appointment.fee || "0.00"} readOnly />
+          <Field name="appointment_status_display" label="Appointment Payment Status" defaultValue={appointmentStatusLabel(appointment.appointmentstatus)} readOnly />
           <Field name="remaining_display" label="Remaining Dues" type="number" defaultValue="0.00" readOnly />
         </> : null}
         <Field name="startDate" label="Start Date" type="date" defaultValue={defaultDate} required />

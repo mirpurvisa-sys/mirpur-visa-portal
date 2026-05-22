@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
-import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +35,9 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
     const now = new Date();
     const total = currentCanViewFinance ? numberValue(formData, "total") : 0;
     const initialPayment = currentCanViewFinance ? numberValue(formData, "initial_payment") : 0;
+    const appointmentDate = dateTimeValue(formData, "appointmentdate");
+    let appointmentFee = currentCanViewFinance ? numberValue(formData, "appointment_fee") : 0;
+    let appointmentStatus = currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid";
     const clientName = `${text(formData, "firstname")} ${text(formData, "lastname")}`.trim();
     const existingClientId = numberValue(formData, "existing_client_id");
     const existingAppointmentId = numberValue(formData, "existing_appointment_id");
@@ -74,13 +77,15 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
       if (existingCase.rows[0]?.id) redirect(`/admin/cases/${existingCase.rows[0].id}`);
       const existingAppointment = await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentIdForCase]);
       const existingAppointmentRow = existingAppointment.rows[0] || {};
+      appointmentFee = currentCanViewFinance ? numberValue(formData, "appointment_fee") : Number(existingAppointmentRow.fee || 0);
+      appointmentStatus = currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : textFromValue(existingAppointmentRow.appointmentstatus, "Unpaid");
       await db.query(
         `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=$5 WHERE id=$6`,
         [
-          currentCanViewFinance ? numberValue(formData, "appointment_fee") : Number(existingAppointmentRow.fee || 0),
-          currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : textFromValue(existingAppointmentRow.appointmentstatus, "Unpaid"),
+          appointmentFee,
+          appointmentStatus,
           text(formData, "appointment_category", "visit"),
-          dateTimeValue(formData, "appointmentdate"),
+          appointmentDate,
           now,
           appointmentIdForCase,
         ],
@@ -94,16 +99,18 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         `,
         [
           clientId,
-          currentCanViewFinance ? numberValue(formData, "appointment_fee") : 0,
-          currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
+          appointmentFee,
+          appointmentStatus,
           text(formData, "appointment_category", "visit"),
-          dateTimeValue(formData, "appointmentdate"),
+          appointmentDate,
           now,
         ],
       );
       appointmentIdForCase = Number(appointment.rows[0].id);
     }
 
+    const receivedAppointmentFee = isPaidStatus(appointmentStatus) ? appointmentFee : 0;
+    const collectedAtCreation = receivedAppointmentFee + initialPayment;
     const caseResult = await db.query(
       `
         INSERT INTO "client_cases" (
@@ -122,8 +129,8 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         clientName,
         total,
         initialPayment,
-        Math.max(total - initialPayment, 0),
-        initialPayment,
+        Math.max(total - collectedAtCreation, 0),
+        collectedAtCreation,
         text(formData, "caseCategory", "Consultation"),
         dateValue(formData, "startDate"),
         nullableText(formData, "endDate"),
@@ -146,13 +153,19 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
     );
 
     const caseId = Number(caseResult.rows[0].id);
+    if (receivedAppointmentFee > 0) {
+      await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+        [caseId, "Appointment Fee", String(receivedAppointmentFee), appointmentDate, now],
+      );
+    }
     if (initialPayment > 0) {
       await db.query(
         `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
         [caseId, text(formData, "installment_name", "Initial payment"), String(initialPayment), dateTimeValue(formData, "installment_time"), now],
       );
-      await syncCaseTotals(caseId);
     }
+    await syncCaseTotals(caseId);
 
     redirect(`/admin/cases/${caseId}`);
   }

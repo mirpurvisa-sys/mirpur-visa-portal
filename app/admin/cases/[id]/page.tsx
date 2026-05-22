@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
-import { checkboxValue, dateTimeValue, dateValue, employeeOptions, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 import { createCaseDocumentSignedUrl, deleteCaseDocumentFromStorage, storagePathFromDocumentValue, uploadCaseDocumentToStorage } from "@/lib/supabaseStorage";
 
 export const dynamic = "force-dynamic";
@@ -230,8 +230,17 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   }
 
   const isEdit = sp.mode === "edit" && canEdit;
-  const paid = Number(caseRow.total_paid || 0);
   const total = Number(caseRow.total || 0);
+  const appointmentPaid = isPaidStatus(caseRow.appointmentstatus);
+  const appointmentFee = Number(caseRow.appointment_fee || 0);
+  const appointmentInstallmentRecorded = installments.some((item) => isAppointmentInstallment(item.name) && amountNumber(item.amount) === appointmentFee);
+  const installmentCollected = installments.reduce((sum, item) => {
+    if (isAppointmentInstallment(item.name) && !appointmentPaid) return sum;
+    return sum + amountNumber(item.amount);
+  }, 0);
+  const paid = installmentCollected + (appointmentPaid && appointmentFee > 0 && !appointmentInstallmentRecorded ? appointmentFee : 0);
+  const remaining = Math.max(total - paid, 0);
+  const receivedAppointmentFee = appointmentPaid ? appointmentFee : 0;
   const formId = `case-update-${caseRow.id}`;
   const assignedTo = [caseRow.employee_firstname, caseRow.employee_lastname].filter(Boolean).join(" ") || "-";
   const clientName = caseRow.client_name || `${caseRow.firstname} ${caseRow.lastname}`.trim();
@@ -271,15 +280,15 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <h3>Payment Details</h3>
           {isEdit ? <div className="paymentFormGrid">
             <Field formId={formId} name="total" label="Total Amount *" type="number" defaultValue={caseRow.total} required />
-            <Field formId={formId} name="appointment_fee" label="Paid Appointment Fee" type="number" defaultValue={caseRow.appointment_fee} readOnly />
-            <Field name="total_paid_display" label="Total Paid Installments" type="number" defaultValue={paid} readOnly />
-            <Field name="remaining_display" label="Remaining Dues" type="number" defaultValue={caseRow.remaining} readOnly />
+            <Field formId={formId} name="appointment_fee" label="Appointment Fee" type="number" defaultValue={caseRow.appointment_fee} readOnly />
+            <Field name="total_paid_display" label="Total Collected" type="number" defaultValue={paid} readOnly />
+            <Field name="remaining_display" label="Remaining Dues" type="number" defaultValue={remaining} readOnly />
             <Field formId={formId} name="advance" label="Advance Amount *" type="number" defaultValue={caseRow.advance} required />
           </div> : <div className="paymentReadGrid">
             <span>Total Amount</span><strong>{plainMoney(total)}</strong>
-            <span>Paid Appointment Fee</span><strong>{plainMoney(caseRow.appointment_fee)}</strong>
-            <span>Total Paid Installments</span><strong>{plainMoney(paid)}</strong>
-            <span>Remaining Amount</span><strong>{plainMoney(caseRow.remaining)}</strong>
+            <span>Collected Appointment Fee</span><strong>{plainMoney(receivedAppointmentFee)}</strong>
+            <span>Total Collected</span><strong>{plainMoney(paid)}</strong>
+            <span>Remaining Amount</span><strong>{plainMoney(remaining)}</strong>
             <span>Advance Amount</span><strong>{plainMoney(caseRow.advance)}</strong>
           </div>}
         </div>
@@ -534,6 +543,15 @@ function stringValue(value: unknown) {
 
 function plainMoney(value: unknown) {
   return money(value).replace("PKR", "").trim();
+}
+
+function amountNumber(value: unknown) {
+  const parsed = Number(String(value ?? "0").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isAppointmentInstallment(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().startsWith("appointment");
 }
 
 function yesNo(value: unknown) {

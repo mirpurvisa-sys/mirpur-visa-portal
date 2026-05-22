@@ -29,18 +29,24 @@ export const RECEIVED_INCOME_CTE = `
       ci.client_case_id,
       cc.client_id,
       cc.appointment_id,
+      a.appointmentstatus,
       ci.name,
       NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric AS amount,
       ci.time,
       COALESCE(NULLIF(cc.client_name, ''), trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, '')))) AS client_name
     FROM "case_installments" ci
     JOIN "client_cases" cc ON cc.id = ci.client_case_id
+    LEFT JOIN "appointments" a ON a.id = cc.appointment_id
     LEFT JOIN "clients" c ON c.id = cc.client_id
   ),
   unsynced_case_installment_income AS (
     SELECT ci.*
     FROM case_installment_rows ci
     WHERE COALESCE(ci.amount, 0) > 0
+      AND NOT (
+        ci.name ILIKE 'Appointment%'
+        AND regexp_replace(lower(COALESCE(ci.appointmentstatus, '')), '[^a-z]', '', 'g') <> 'paid'
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM "incomes" i

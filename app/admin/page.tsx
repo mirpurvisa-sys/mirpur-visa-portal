@@ -57,7 +57,7 @@ export default async function AdminDashboard() {
         <div className="chartHead">
           <div>
             <h2>Money Trail</h2>
-            <p>Month-wise total income and expense</p>
+            <p>Month-wise collected income and expense</p>
           </div>
           <div className="chartLegend">
             <span><i className="blueDot" /> Income</span>
@@ -121,7 +121,7 @@ function MoneyTrailChart({ data }: { data: MoneyPoint[] }) {
 
   return <div className="moneyChart" aria-label="Money trail chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img">
-      <title>Month-wise income and expense from database records</title>
+      <title>Month-wise collected income and expense from received records</title>
       <g stroke="#e2e8f0" strokeWidth="1">
         {gridValues.map((value) => {
           const y = valueToY(value, axisMax, top, chartHeight);
