@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
@@ -87,8 +88,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       ],
     );
 
-    await db.query(
-      `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6)`,
+    const created = await db.query(
+      `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING id`,
       [
         Number(client.rows[0].id),
         currentCanEditAppointmentPayments ? numberValue(formData, "fee") : 0,
@@ -98,6 +99,14 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         now,
       ],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "appointments",
+      resourceTitle: "Appointment",
+      subjectId: created.rows[0]?.id,
+      properties: { client_id: Number(client.rows[0].id) },
+    });
 
     redirect("/admin/appointments");
   }
@@ -114,8 +123,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const existing = currentCanEditAppointmentPayments ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
     const existingRow = existing?.rows[0] || {};
 
-    await db.query(
-      `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW() WHERE id=$5`,
+    const updated = await db.query(
+      `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW() WHERE id=$5 RETURNING id`,
       [
         currentCanEditAppointmentPayments ? numberValue(formData, "fee") : Number(existingRow.fee || 0),
         currentCanEditAppointmentPayments ? text(formData, "appointmentstatus") : textFromValue(existingRow.appointmentstatus, "Unpaid"),
@@ -124,6 +133,13 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         appointmentId,
       ],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "updated",
+      resource: "appointments",
+      resourceTitle: "Appointment",
+      subjectId: updated.rows[0]?.id ?? appointmentId,
+    });
 
     redirect("/admin/appointments");
   }
@@ -138,7 +154,15 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const linked = await getDb().query(`SELECT COUNT(*)::int AS count FROM "client_cases" WHERE appointment_id=$1`, [appointmentId]);
     if (Number(linked.rows[0]?.count || 0) > 0) throw new Error("This appointment is linked to a case. Edit the case instead of deleting the appointment.");
 
-    await getDb().query(`DELETE FROM "appointments" WHERE id=$1`, [appointmentId]);
+    const deleted = await getDb().query(`DELETE FROM "appointments" WHERE id=$1 RETURNING id, client_id`, [appointmentId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "appointments",
+      resourceTitle: "Appointment",
+      subjectId: deleted.rows[0]?.id ?? appointmentId,
+      properties: { client_id: deleted.rows[0]?.client_id },
+    });
     redirect("/admin/appointments");
   }
 
@@ -220,6 +244,14 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     }
 
     await syncCaseTotals(caseId);
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "cases",
+      resourceTitle: "Client Case",
+      subjectId: caseId,
+      properties: { appointment_id: appointmentId, client_id: Number(seed.client_id), collected: totalPaid },
+    });
     redirect(`/admin/cases/${caseId}`);
   }
 

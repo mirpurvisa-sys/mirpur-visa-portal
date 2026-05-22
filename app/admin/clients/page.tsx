@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ListPlus, Pencil, Plus, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewResource } from "@/lib/permissions";
@@ -48,7 +49,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     const currentResource = getResource("clients");
     if (!currentResource || !canCreateResource(currentUser, currentResource)) throw new Error("You do not have permission to create clients.");
 
-    await getDb().query(
+    const created = await getDb().query(
       `
         INSERT INTO "clients" (
           ref_id, firstname, lastname, email, epassword, phone, phone2, cnic, cnic_issue,
@@ -56,9 +57,18 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           visa_category, passport_no, passport_issue, passport_expiry, documents, created_at, updated_at
         )
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW())
+        RETURNING id
       `,
       clientValues(formData),
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "clients",
+      resourceTitle: "Client",
+      subjectId: created.rows[0]?.id,
+      properties: { name: `${text(formData, "firstname")} ${text(formData, "lastname")}`.trim() },
+    });
 
     redirect("/admin/clients");
   }
@@ -74,8 +84,8 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     const client = await getDb().query(`SELECT id FROM "clients" WHERE id=$1 LIMIT 1`, [clientId]);
     if (!client.rows[0]) throw new Error("Client was not found.");
 
-    await getDb().query(
-      `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW())`,
+    const created = await getDb().query(
+      `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,NOW(),NOW()) RETURNING id`,
       [
         clientId,
         currentCanEditAppointmentPayments ? numberValue(formData, "fee") : 0,
@@ -84,6 +94,14 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         dateTimeValue(formData, "appointmentdate"),
       ],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "appointments",
+      resourceTitle: "Appointment",
+      subjectId: created.rows[0]?.id,
+      properties: { client_id: clientId },
+    });
 
     redirect("/admin/clients");
   }
@@ -106,7 +124,15 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     const row = linked.rows[0] || {};
     if (Number(row.appointments || 0) > 0 || Number(row.cases || 0) > 0) redirect("/admin/clients?error=linked");
 
-    await getDb().query(`DELETE FROM "clients" WHERE id=$1`, [clientId]);
+    const deleted = await getDb().query(`DELETE FROM "clients" WHERE id=$1 RETURNING id, firstname, lastname`, [clientId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "clients",
+      resourceTitle: "Client",
+      subjectId: deleted.rows[0]?.id ?? clientId,
+      properties: { name: `${deleted.rows[0]?.firstname || ""} ${deleted.rows[0]?.lastname || ""}`.trim() },
+    });
     redirect("/admin/clients");
   }
 

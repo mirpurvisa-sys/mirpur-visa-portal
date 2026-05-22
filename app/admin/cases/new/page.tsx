@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
@@ -166,6 +167,18 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
       );
     }
     await syncCaseTotals(caseId);
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "cases",
+      resourceTitle: "Client Case",
+      subjectId: caseId,
+      properties: {
+        client_id: clientId,
+        appointment_id: appointmentIdForCase,
+        collected: collectedAtCreation,
+      },
+    });
 
     redirect(`/admin/cases/${caseId}`);
   }

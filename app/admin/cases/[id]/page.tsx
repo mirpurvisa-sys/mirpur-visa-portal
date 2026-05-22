@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
@@ -146,6 +147,14 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     );
 
     await syncCaseTotals(caseId);
+    await recordActivity({
+      user: currentUser,
+      action: "updated",
+      resource: "cases",
+      resourceTitle: "Client Case",
+      subjectId: caseId,
+      properties: { total: totalValue, appointment_status: appointmentStatus },
+    });
     redirect(`/admin/cases/${caseId}`);
   }
 
@@ -155,11 +164,19 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const currentResource = getResource("case-installments");
     if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to add installments.");
 
-    await getDb().query(
-      `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,NOW(),NOW())`,
+    const created = await getDb().query(
+      `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id`,
       [caseId, text(formData, "name", "Installment"), String(numberValue(formData, "amount")), dateTimeValue(formData, "time")],
     );
     await syncCaseTotals(caseId);
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "case-installments",
+      resourceTitle: "Case Installment",
+      subjectId: created.rows[0]?.id,
+      properties: { case_id: caseId, amount: numberValue(formData, "amount") },
+    });
     redirect(`/admin/cases/${caseId}`);
   }
 
@@ -169,8 +186,17 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const currentResource = getResource("case-installments");
     if (!currentResource || !canDeleteResource(currentUser, currentResource)) throw new Error("You do not have permission to delete installments.");
 
-    await getDb().query(`DELETE FROM "case_installments" WHERE id=$1 AND client_case_id=$2`, [Number(formData.get("installment_id")), caseId]);
+    const installmentId = Number(formData.get("installment_id"));
+    const deleted = await getDb().query(`DELETE FROM "case_installments" WHERE id=$1 AND client_case_id=$2 RETURNING id, amount`, [installmentId, caseId]);
     await syncCaseTotals(caseId);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "case-installments",
+      resourceTitle: "Case Installment",
+      subjectId: deleted.rows[0]?.id ?? installmentId,
+      properties: { case_id: caseId, amount: deleted.rows[0]?.amount },
+    });
     redirect(`/admin/cases/${caseId}`);
   }
 
@@ -179,7 +205,15 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
     if (!currentResource || !canDeleteResource(currentUser, currentResource)) throw new Error("You do not have permission to delete cases.");
-    await getDb().query(`DELETE FROM "client_cases" WHERE id=$1`, [caseId]);
+    const deleted = await getDb().query(`DELETE FROM "client_cases" WHERE id=$1 RETURNING id, client_id`, [caseId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "cases",
+      resourceTitle: "Client Case",
+      subjectId: deleted.rows[0]?.id ?? caseId,
+      properties: { client_id: deleted.rows[0]?.client_id },
+    });
     redirect("/admin/cases");
   }
 
@@ -204,6 +238,13 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
       );
     }
 
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "documents",
+      resourceTitle: "Case Document",
+      properties: { case_id: caseId, count: uploadedFiles.length, document_type: documentType },
+    });
     revalidatePath(`/admin/cases/${caseId}`);
     redirect(documentReturnPath);
   }
@@ -225,6 +266,14 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const storagePath = storagePathFromDocumentValue(document.document);
     if (storagePath) await deleteCaseDocumentFromStorage(storagePath);
     await db.query(`DELETE FROM "documents" WHERE id=$1 AND client_case_id=$2`, [documentId, caseId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "documents",
+      resourceTitle: "Case Document",
+      subjectId: documentId,
+      properties: { case_id: caseId },
+    });
     revalidatePath(`/admin/cases/${caseId}`);
     redirect(documentReturnPath);
   }

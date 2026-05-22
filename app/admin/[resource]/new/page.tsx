@@ -5,6 +5,7 @@ import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { nextExpenseVoucherNo } from "@/lib/erp";
 import { canCreateResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
@@ -28,7 +29,15 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "create"), "create");
     if (res.key === "expenses") data.voucher_no = await nextExpenseVoucherNo();
-    await delegate(res.model).create({ data });
+    const created = await delegate(res.model).create({ data });
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: res.key,
+      resourceTitle: res.title,
+      subjectId: created?.id,
+      properties: { model: res.model },
+    });
     redirect(`/admin/${res.key}`);
   }
   return <>

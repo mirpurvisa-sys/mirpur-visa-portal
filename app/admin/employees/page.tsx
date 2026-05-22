@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { EllipsisVertical, Eye, LockKeyhole, Pencil, Plus, Search, Trash2, UploadCloud } from "lucide-react";
 import bcrypt from "bcryptjs";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource, isAdmin } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
@@ -95,10 +96,11 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
     const userId = Number(createdUser.rows[0]?.id);
     await syncUserRole(userId, designation);
 
-    await db.query(
+    const createdEmployee = await db.query(
       `
         INSERT INTO "employees" (user_id, emp_id, firstname, lastname, phone, designation, joining_date, city, province, country, address, salary, created_at, updated_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),NOW())
+        RETURNING id
       `,
       [
         userId,
@@ -115,6 +117,14 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
         canViewFinance(currentUser) ? numberValue(formData, "salary") : 0,
       ],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "employees",
+      resourceTitle: "Employee",
+      subjectId: createdEmployee.rows[0]?.id,
+      properties: { user_id: userId, designation },
+    });
     redirect("/admin/employees");
   }
 
@@ -173,6 +183,14 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
       );
       await syncUserRole(userId, designation);
     }
+    await recordActivity({
+      user: currentUser,
+      action: "updated",
+      resource: "employees",
+      resourceTitle: "Employee",
+      subjectId: employeeId,
+      properties: { user_id: userId, designation },
+    });
     redirect("/admin/employees");
   }
 
@@ -184,7 +202,18 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
     const employeeId = numberValue(formData, "id");
     const assigned = await getDb().query(`SELECT COUNT(*)::int AS count FROM "client_cases" WHERE employee_id=$1`, [employeeId]);
     if (Number(assigned.rows[0]?.count || 0) > 0) throw new Error("Reassign this employee's cases before deleting the employee.");
-    await getDb().query(`DELETE FROM "employees" WHERE id=$1`, [employeeId]);
+    const deleted = await getDb().query(`DELETE FROM "employees" WHERE id=$1 RETURNING id, user_id, firstname, lastname`, [employeeId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "employees",
+      resourceTitle: "Employee",
+      subjectId: deleted.rows[0]?.id ?? employeeId,
+      properties: {
+        user_id: deleted.rows[0]?.user_id,
+        name: `${deleted.rows[0]?.firstname || ""} ${deleted.rows[0]?.lastname || ""}`.trim(),
+      },
+    });
     redirect("/admin/employees");
   }
 
@@ -205,6 +234,14 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
 
     const hash = await bcrypt.hash(password, 10);
     await getDb().query(`UPDATE "users" SET password=$1, updated_at=NOW() WHERE id=$2`, [hash, userId]);
+    await recordActivity({
+      user: currentUser,
+      action: "updated",
+      resource: "employees",
+      resourceTitle: "Employee Password",
+      subjectId: employeeId,
+      properties: { user_id: userId },
+    });
     redirect("/admin/employees?reset_success=1");
   }
 

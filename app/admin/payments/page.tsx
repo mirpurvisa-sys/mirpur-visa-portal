@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
@@ -30,10 +31,19 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     const currentUser = await requireUser();
     const resource = getResource("incomes");
     if (!resource || !canCreateResource(currentUser, resource)) throw new Error("You do not have permission to add income.");
-    await getDb().query(
-      `INSERT INTO "incomes" ("Title", "IncomesType", "Amount", "Description", "Date", foreign_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())`,
-      [text(formData, "Title"), text(formData, "IncomesType", "Appointment"), numberValue(formData, "Amount"), nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
+    const amount = numberValue(formData, "Amount");
+    const created = await getDb().query(
+      `INSERT INTO "incomes" ("Title", "IncomesType", "Amount", "Description", "Date", foreign_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`,
+      [text(formData, "Title"), text(formData, "IncomesType", "Appointment"), amount, nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "incomes",
+      resourceTitle: "Income",
+      subjectId: created.rows[0]?.id,
+      properties: { amount },
+    });
     redirect("/admin/payments?tab=income");
   }
 
@@ -42,7 +52,16 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     const currentUser = await requireUser();
     const resource = getResource("incomes");
     if (!resource || !canDeleteResource(currentUser, resource)) throw new Error("You do not have permission to delete income.");
-    await getDb().query(`DELETE FROM "incomes" WHERE id=$1`, [numberValue(formData, "income_id")]);
+    const incomeId = numberValue(formData, "income_id");
+    const deleted = await getDb().query(`DELETE FROM "incomes" WHERE id=$1 RETURNING id, "Amount" AS amount`, [incomeId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "incomes",
+      resourceTitle: "Income",
+      subjectId: deleted.rows[0]?.id ?? incomeId,
+      properties: { amount: deleted.rows[0]?.amount },
+    });
     redirect("/admin/payments?tab=income");
   }
 

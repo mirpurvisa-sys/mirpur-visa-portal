@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
@@ -41,10 +42,19 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     if (!resource || !canCreateResource(currentUser, resource)) throw new Error("You do not have permission to add expenses.");
 
     const voucherNo = await nextExpenseVoucherNo();
-    await getDb().query(
-      `INSERT INTO "expenses" (voucher_no, "Title", "ExpenseType", "Amount", "Description", "Date", created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())`,
-      [voucherNo, text(formData, "Title"), text(formData, "ExpenseType", "Others"), numberValue(formData, "Amount"), text(formData, "Description", "--"), dateValue(formData, "Date")],
+    const amount = numberValue(formData, "Amount");
+    const created = await getDb().query(
+      `INSERT INTO "expenses" (voucher_no, "Title", "ExpenseType", "Amount", "Description", "Date", created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`,
+      [voucherNo, text(formData, "Title"), text(formData, "ExpenseType", "Others"), amount, text(formData, "Description", "--"), dateValue(formData, "Date")],
     );
+    await recordActivity({
+      user: currentUser,
+      action: "created",
+      resource: "expenses",
+      resourceTitle: "Expense",
+      subjectId: created.rows[0]?.id,
+      properties: { voucher_no: voucherNo, amount },
+    });
     redirect("/admin/expenses");
   }
 
@@ -54,7 +64,16 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
     const resource = getResource("expenses");
     if (!resource || !canDeleteResource(currentUser, resource)) throw new Error("You do not have permission to delete expenses.");
 
-    await getDb().query(`DELETE FROM "expenses" WHERE id=$1`, [numberValue(formData, "expense_id")]);
+    const expenseId = numberValue(formData, "expense_id");
+    const deleted = await getDb().query(`DELETE FROM "expenses" WHERE id=$1 RETURNING id, voucher_no, "Amount" AS amount`, [expenseId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "expenses",
+      resourceTitle: "Expense",
+      subjectId: deleted.rows[0]?.id ?? expenseId,
+      properties: { voucher_no: deleted.rows[0]?.voucher_no, amount: deleted.rows[0]?.amount },
+    });
     redirect("/admin/expenses");
   }
 

@@ -3,6 +3,7 @@ import { Activity, Clock3, Database, Fingerprint, Search, UserRound } from "luci
 import { getResource } from "@/lib/adminConfig";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { APP_TODAY_SQL } from "@/lib/finance";
 import { canSearch, canViewResource } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -213,7 +214,7 @@ async function getActivityStats(): Promise<ActivityStats> {
   const result = await getDb().query(`
     SELECT
       COUNT(*)::int AS total,
-      COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE)::int AS today,
+      COUNT(*) FILTER (WHERE created_at::date = ${APP_TODAY_SQL})::int AS today,
       COUNT(*) FILTER (WHERE causer_id IS NULL)::int AS system,
       COUNT(DISTINCT causer_id)::int AS actors
     FROM "activity_log"

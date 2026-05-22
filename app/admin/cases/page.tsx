@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
+import { recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
@@ -28,7 +29,15 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
     const caseId = Number(formData.get("id") || 0);
     if (!Number.isFinite(caseId) || caseId <= 0) throw new Error("Invalid case.");
     await getDb().query(`DELETE FROM "case_installments" WHERE client_case_id=$1`, [caseId]);
-    await getDb().query(`DELETE FROM "client_cases" WHERE id=$1`, [caseId]);
+    const deleted = await getDb().query(`DELETE FROM "client_cases" WHERE id=$1 RETURNING id, client_id`, [caseId]);
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: "cases",
+      resourceTitle: "Client Case",
+      subjectId: deleted.rows[0]?.id ?? caseId,
+      properties: { client_id: deleted.rows[0]?.client_id },
+    });
     redirect("/admin/cases");
   }
 

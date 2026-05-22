@@ -5,6 +5,7 @@ import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData, parseRecordWhere } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
+import { changedFields, recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,15 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     if(!canEditResource(currentUser, res)) throw new Error("You do not have permission to edit this record.");
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "edit"), "edit"); delete data.created_at;
-    await delegate(res.model).update({ where: parseRecordWhere(res, id), data });
+    const updated = await delegate(res.model).update({ where: parseRecordWhere(res, id), data });
+    await recordActivity({
+      user: currentUser,
+      action: "updated",
+      resource: res.key,
+      resourceTitle: res.title,
+      subjectId: updated?.id ?? id,
+      properties: { model: res.model, fields: changedFields(data) },
+    });
     redirect(`/admin/${res.key}`);
   }
   async function deleteAction(){
@@ -37,7 +46,15 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canDeleteResource(currentUser, res)) throw new Error("You do not have permission to delete this record.");
-    await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
+    const deleted = await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
+    await recordActivity({
+      user: currentUser,
+      action: "deleted",
+      resource: res.key,
+      resourceTitle: res.title,
+      subjectId: deleted?.id ?? id,
+      properties: { model: res.model },
+    });
     redirect(`/admin/${res.key}`);
   }
   return <>

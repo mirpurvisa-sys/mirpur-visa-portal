@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import bcrypt from "bcryptjs";
+import { recordActivity } from "./activityLog";
 import { getDb } from "./db";
 
 const SESSION_COOKIE = "mvc_admin_session";
@@ -38,12 +39,30 @@ export async function login(email: string, password: string) {
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 
+  await recordActivity({
+    user,
+    action: "login",
+    resource: "auth",
+    resourceTitle: "User session",
+    subjectId: user.id,
+    properties: { email: user.email },
+  });
+
   return { ok: true };
 }
 
 export async function logout() {
+  const user = await getCurrentUser();
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
+  await recordActivity({
+    user,
+    action: "logout",
+    resource: "auth",
+    resourceTitle: "User session",
+    subjectId: user?.id,
+    properties: { email: user?.email },
+  });
 }
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
