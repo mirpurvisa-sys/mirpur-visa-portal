@@ -12,8 +12,10 @@ export function getDb(): PgPool {
     globalForPg.pgPool = new pg.Pool({
       connectionString: withoutSslMode(process.env.DATABASE_URL || ""),
       ssl: { rejectUnauthorized: false },
-      max: 5,
-      connectionTimeoutMillis: 20000,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 8000,
+      keepAlive: true,
     });
   }
 

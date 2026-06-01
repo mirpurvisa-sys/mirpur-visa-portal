@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import bcrypt from "bcryptjs";
 import { recordActivity } from "./activityLog";
 import { getDb } from "./db";
@@ -65,7 +66,7 @@ export async function logout() {
   });
 }
 
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+export const getCurrentUser = cache(async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   const session = verifySession(token);
@@ -105,7 +106,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     roleSlugs: user.role_slugs ?? [],
     permissionSlugs: user.permission_slugs ?? [],
   };
-}
+});
 
 export async function requireUser() {
   const user = await getCurrentUser();

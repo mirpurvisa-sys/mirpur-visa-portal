@@ -25,8 +25,10 @@ export default async function ResourcePage({ params, searchParams }: { params: P
   let count = 0;
   try {
     const where = buildWhere(visibleResource, q);
-    count = await delegate(resource.model).count({ where });
-    rows = await delegate(resource.model).findMany({ where, take: 50, orderBy: { [resource.primaryKey[0] || "id"]: "desc" } });
+    [count, rows] = await Promise.all([
+      delegate(resource.model).count({ where }),
+      delegate(resource.model).findMany({ where, take: 50, orderBy: { [resource.primaryKey[0] || "id"]: "desc" } }),
+    ]);
   } catch(e:any) {
     return <div className="panel"><h1>{resource.title}</h1><p>Database error. Check the Supabase connection in <b>.env</b>.</p><pre>{String(e.message || e)}</pre></div>
   }

@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import type { CurrentUser } from "./auth";
 import { getDb } from "./db";
 
@@ -15,7 +16,7 @@ type ActivityLogInput = {
 const SENSITIVE_KEYS = new Set(["password", "epassword", "remember_token", "token"]);
 const NOISY_KEYS = new Set(["created_at", "updated_at"]);
 
-export async function recordActivity({
+export function recordActivity({
   action,
   properties,
   resource,
@@ -23,35 +24,37 @@ export async function recordActivity({
   subjectId,
   user,
 }: ActivityLogInput) {
-  try {
-    const label = resourceTitle || titleFromResource(resource);
-    await getDb().query(
-      `
-        INSERT INTO "activity_log" (
-          log_name, description, subject_type, subject_id, causer_type, causer_id,
-          properties, created_at, updated_at
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
-      `,
-      [
-        resource,
-        `${label} ${action}`,
-        resource,
-        numericId(subjectId),
-        user ? "users" : null,
-        user?.id ?? null,
-        serializeProperties({
-          action,
+  after(async () => {
+    try {
+      const label = resourceTitle || titleFromResource(resource);
+      await getDb().query(
+        `
+          INSERT INTO "activity_log" (
+            log_name, description, subject_type, subject_id, causer_type, causer_id,
+            properties, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
+        `,
+        [
           resource,
-          subject_id: subjectId,
-          user: user ? displayUser(user) : null,
-          ...sanitizeProperties(properties),
-        }),
-      ],
-    );
-  } catch (error) {
-    console.warn("Unable to record activity log", error);
-  }
+          `${label} ${action}`,
+          resource,
+          numericId(subjectId),
+          user ? "users" : null,
+          user?.id ?? null,
+          serializeProperties({
+            action,
+            resource,
+            subject_id: subjectId,
+            user: user ? displayUser(user) : null,
+            ...sanitizeProperties(properties),
+          }),
+        ],
+      );
+    } catch (error) {
+      console.warn("Unable to record activity log", error);
+    }
+  });
 }
 
 export function changedFields(data: Record<string, unknown>) {

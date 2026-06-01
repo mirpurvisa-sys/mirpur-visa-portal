@@ -27,6 +27,7 @@ type TopbarPayload = {
 };
 
 type DropdownState = "search" | "notifications" | "profile" | null;
+type TopbarScope = Exclude<DropdownState, null>;
 
 const STORAGE_KEY = "mvc_topbar_read_notifications";
 
@@ -43,9 +44,9 @@ export function TopbarDropdowns({
   const [notifications, setNotifications] = useState<TopbarNotification[]>([]);
   const [profileHrefState, setProfileHrefState] = useState(profileHref || "/admin");
   const [searchItems, setSearchItems] = useState<TopbarSearchItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const loadingRef = useRef(false);
+  const [loadedScopes, setLoadedScopes] = useState<TopbarScope[]>([]);
+  const [loadingScope, setLoadingScope] = useState<TopbarScope | null>(null);
+  const loadingRef = useRef<Set<TopbarScope>>(new Set());
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -86,31 +87,31 @@ export function TopbarDropdowns({
 
   const unreadCount = notifications.filter((notification) => !readIds.includes(notification.id)).length;
 
-  async function loadTopbarData() {
-    if (loaded || loadingRef.current) return;
+  async function loadTopbarData(scope: TopbarScope) {
+    if (loadedScopes.includes(scope) || loadingRef.current.has(scope)) return;
 
-    loadingRef.current = true;
-    setLoading(true);
+    loadingRef.current.add(scope);
+    setLoadingScope(scope);
     try {
-      const response = await fetch("/api/topbar", { credentials: "same-origin" });
+      const response = await fetch(`/api/topbar?scope=${scope}`, { credentials: "same-origin" });
       if (!response.ok) return;
 
       const payload = (await response.json()) as TopbarPayload;
-      setNotifications(Array.isArray(payload.notifications) ? payload.notifications : []);
-      setSearchItems(Array.isArray(payload.searchItems) ? payload.searchItems : []);
+      if (Array.isArray(payload.notifications)) setNotifications(payload.notifications);
+      if (Array.isArray(payload.searchItems)) setSearchItems(payload.searchItems);
       if (payload.profileHref) setProfileHrefState(payload.profileHref);
-      setLoaded(true);
+      setLoadedScopes((current) => (current.includes(scope) ? current : [...current, scope]));
     } catch {
       // Dropdown data can be retried next time without breaking the main page.
     } finally {
-      loadingRef.current = false;
-      setLoading(false);
+      loadingRef.current.delete(scope);
+      setLoadingScope(null);
     }
   }
 
   function openDropdown(next: Exclude<DropdownState, null>) {
     setOpen(open === next ? null : next);
-    if (open !== next) void loadTopbarData();
+    if (open !== next) void loadTopbarData(next);
   }
 
   function persistReadIds(ids: string[]) {
@@ -146,11 +147,11 @@ export function TopbarDropdowns({
             onChange={(event) => {
               setQuery(event.target.value);
               setOpen("search");
-              void loadTopbarData();
+              void loadTopbarData("search");
             }}
             onFocus={() => {
               setOpen("search");
-              void loadTopbarData();
+              void loadTopbarData("search");
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
@@ -169,7 +170,7 @@ export function TopbarDropdowns({
               <span>{filteredSearchItems.length} result{filteredSearchItems.length === 1 ? "" : "s"}</span>
             </div>
             <div className="topDropdownList">
-              {loading && !loaded ? (
+              {loadingScope === "search" && !loadedScopes.includes("search") ? (
                 <div className="topDropdownEmpty">Loading search...</div>
               ) : filteredSearchItems.length ? (
                 filteredSearchItems.map((item) => (
@@ -215,7 +216,7 @@ export function TopbarDropdowns({
               </button>
             </div>
             <div className="topDropdownList">
-              {loading && !loaded ? (
+              {loadingScope === "notifications" && !loadedScopes.includes("notifications") ? (
                 <div className="topDropdownEmpty">Loading notifications...</div>
               ) : notifications.length ? (
                 notifications.map((notification) => {

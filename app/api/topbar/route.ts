@@ -7,15 +7,25 @@ import type { TopbarNotification, TopbarSearchItem } from "@/components/TopbarDr
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+type TopbarScope = "all" | "notifications" | "profile" | "search";
+
+export async function GET(request: Request) {
   const user = await requireUser();
+  const scope = topbarScope(new URL(request.url).searchParams.get("scope"));
   const [profileHref, searchItems, notifications] = await Promise.all([
-    getProfileHref(user),
-    getTopbarSearchItems(user),
-    getTopbarNotifications(user),
+    scope === "all" || scope === "profile" ? getProfileHref(user) : Promise.resolve(undefined),
+    scope === "all" || scope === "search" ? getTopbarSearchItems(user) : Promise.resolve(undefined),
+    scope === "all" || scope === "notifications" ? getTopbarNotifications(user) : Promise.resolve(undefined),
   ]);
 
-  return NextResponse.json({ profileHref, searchItems, notifications });
+  return NextResponse.json(
+    { profileHref, searchItems, notifications },
+    { headers: { "Cache-Control": "private, max-age=20, stale-while-revalidate=60" } },
+  );
+}
+
+function topbarScope(value: string | null): TopbarScope {
+  return value === "notifications" || value === "profile" || value === "search" ? value : "all";
 }
 
 async function getProfileHref(user: CurrentUser) {
