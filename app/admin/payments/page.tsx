@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { unstable_cache } from "next/cache";
+import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
 import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { dateValue, money, nullableText, numberValue, text, today } from "@/lib/erp";
-import { getReceivedIncomeTotal } from "@/lib/finance";
+import { FINANCE_CACHE_TAG, getReceivedIncomeTotal, revalidateFinanceCache } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       `INSERT INTO "incomes" ("Title", "IncomesType", "Amount", "Description", "Date", foreign_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`,
       [text(formData, "Title"), text(formData, "IncomesType", "Appointment"), amount, nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
     );
+    revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "created",
@@ -54,6 +56,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     if (!resource || !canDeleteResource(currentUser, resource)) throw new Error("You do not have permission to delete income.");
     const incomeId = numberValue(formData, "income_id");
     const deleted = await getDb().query(`DELETE FROM "incomes" WHERE id=$1 RETURNING id, "Amount" AS amount`, [incomeId]);
+    revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "deleted",
@@ -75,7 +78,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       <div>
         <div className="eyebrow">Finance</div>
         <h1>Income</h1>
-        <p>Track received appointment, service, and case income.</p>
+        <p>Track every collected earning from cases, appointments, courses, services, and manual income.</p>
       </div>
       {canCreateIncome ? <a className="btn btnPrimary" href="#add-transaction"><Plus size={16}/> Add New Income</a> : null}
     </div>
@@ -120,6 +123,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
           <th>Income Type</th>
           <th>Amount</th>
           <th>Description</th>
+          <th>Reference</th>
           <th>Date</th>
           <th className="actionColumn">Actions</th>
         </tr></thead>
@@ -129,18 +133,21 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
           <td>{item.category}</td>
           <td>{money(item.amount)}</td>
           <td>{item.description || "--"}</td>
+          <td>{item.reference || "--"}</td>
           <td>{formatDate(item.date)}</td>
           <td className="actionColumn"><div className="actionStack">
-            <Link className="actionBtn edit" href={`/admin/incomes/${item.id}/edit`} aria-label="Edit income"><Pencil size={18}/></Link>
-            {canDeleteIncome ? <form action={deleteIncome}>
-              <input type="hidden" name="income_id" value={item.id}/>
-              <button className="actionBtn delete" aria-label="Delete income"><Trash2 size={18}/></button>
-            </form> : <span className="muted">Locked</span>}
+            {item.source_type === "manual_income" ? <>
+              <Link className="actionBtn edit" href={item.href} aria-label="Edit manual income"><Pencil size={18}/></Link>
+              {canDeleteIncome ? <form action={deleteIncome}>
+                <input type="hidden" name="income_id" value={item.record_id}/>
+                <button className="actionBtn delete" aria-label="Delete manual income"><Trash2 size={18}/></button>
+              </form> : <span className="muted">Locked</span>}
+            </> : <Link className="actionBtn view" href={item.href} aria-label="Open earning source"><Eye size={18}/></Link>}
           </div></td>
         </tr>)}</tbody>
       </table>
       {transactions.length === 0 ? <div className="emptyState">No income records found.</div> : null}
-      <div className="tableFoot">Showing 1 to {Math.min(transactions.length, 10)} of {transactions.length} entries <span>Previous&nbsp;&nbsp;<b>1</b>&nbsp;&nbsp;Next</span></div>
+      <div className="tableFoot">Showing latest {transactions.length} collected earnings from all source types <span>Cases&nbsp;&nbsp;Appointments&nbsp;&nbsp;Manual</span></div>
     </section>
   </>;
 }
@@ -149,15 +156,98 @@ async function getPaymentStats() {
   return { income: await getReceivedIncomeTotal() };
 }
 
-async function getTransactions() {
+const getTransactions = unstable_cache(async function getTransactions() {
   const result = await getDb().query(`
-    SELECT id::text AS id, "Title" AS title, "IncomesType" AS category, "Amount" AS amount, "Description" AS description, "Date" AS date, foreign_id AS reference
-    FROM "incomes"
-    ORDER BY "Date" DESC NULLS LAST, id DESC
+    WITH parsed_case_installments AS (
+      SELECT
+        ci.id,
+        ci.client_case_id,
+        ci.name,
+        COALESCE(NULLIF(regexp_replace(ci.amount, '[^0-9.-]', '', 'g'), '')::numeric, 0) AS amount,
+        COALESCE(ci.time::date, ci.created_at::date) AS received_on
+      FROM "case_installments" ci
+    ),
+    case_earnings AS (
+      SELECT
+        'case_installment:' || ci.id::text AS id,
+        'case_installment' AS source_type,
+        ci.id::text AS record_id,
+        COALESCE(NULLIF(cc.client_name, ''), NULLIF(trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))), ''), 'Case #' || cc.id::text) AS title,
+        'Case Installment' AS category,
+        COALESCE(NULLIF(ci.name, ''), 'Case payment') AS description,
+        ci.amount,
+        COALESCE(ci.received_on, cc.created_at::date) AS date,
+        'Case #' || cc.id::text AS reference,
+        '/admin/cases/' || cc.id::text AS href,
+        ci.id AS sort_id
+      FROM parsed_case_installments ci
+      JOIN "client_cases" cc ON cc.id = ci.client_case_id
+      LEFT JOIN "appointments" a ON a.id = cc.appointment_id
+      LEFT JOIN "clients" c ON c.id = cc.client_id
+      WHERE ci.amount > 0
+        AND NOT (
+          ci.name ILIKE 'Appointment%'
+          AND regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') <> 'paid'
+        )
+    ),
+    appointment_earnings AS (
+      SELECT
+        'appointment:' || a.id::text AS id,
+        'appointment' AS source_type,
+        a.id::text AS record_id,
+        COALESCE(NULLIF(trim(concat(COALESCE(c.firstname, ''), ' ', COALESCE(c.lastname, ''))), ''), 'Appointment #' || a.id::text) AS title,
+        'Appointment' AS category,
+        'Paid appointment fee' AS description,
+        a.fee::numeric AS amount,
+        COALESCE(a.appointmentdate::date, a.created_at::date) AS date,
+        'Appointment #' || a.id::text AS reference,
+        '/admin/appointments?edit=' || a.id::text AS href,
+        a.id AS sort_id
+      FROM "appointments" a
+      JOIN "clients" c ON c.id = a.client_id
+      WHERE regexp_replace(lower(COALESCE(a.appointmentstatus, '')), '[^a-z]', '', 'g') = 'paid'
+        AND COALESCE(a.fee, 0) > 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "client_cases" cc
+          JOIN parsed_case_installments ci ON ci.client_case_id = cc.id
+          WHERE cc.appointment_id = a.id
+            AND ci.name ILIKE 'Appointment%'
+            AND ci.amount = COALESCE(a.fee, 0)
+        )
+    ),
+    manual_earnings AS (
+      SELECT
+        'manual_income:' || i.id::text AS id,
+        'manual_income' AS source_type,
+        i.id::text AS record_id,
+        COALESCE(NULLIF(i."Title", ''), 'Income #' || i.id::text) AS title,
+        COALESCE(NULLIF(i."IncomesType", ''), 'Income') AS category,
+        i."Description" AS description,
+        i."Amount"::numeric AS amount,
+        i."Date"::date AS date,
+        COALESCE(NULLIF(i.foreign_id, ''), 'Income #' || i.id::text) AS reference,
+        '/admin/incomes/' || i.id::text || '/edit' AS href,
+        i.id AS sort_id
+      FROM "incomes" i
+      WHERE COALESCE(i."Amount", 0) > 0
+        AND COALESCE(i."IncomesType", '') NOT ILIKE 'Appointment%'
+        AND COALESCE(i."IncomesType", '') NOT ILIKE 'Case Installment%'
+    ),
+    all_earnings AS (
+      SELECT * FROM case_earnings
+      UNION ALL
+      SELECT * FROM appointment_earnings
+      UNION ALL
+      SELECT * FROM manual_earnings
+    )
+    SELECT id, source_type, record_id, title, category, amount, description, date, reference, href
+    FROM all_earnings
+    ORDER BY date DESC NULLS LAST, sort_id DESC
     LIMIT 80
   `);
   return result.rows;
-}
+}, ["income-all-earnings-v1"], { revalidate: 60, tags: [FINANCE_CACHE_TAG] });
 
 function Field({ name, label, type = "text", required, defaultValue }: { name: string; label: string; type?: string; required?: boolean; defaultValue?: string }) {
   return <div><label className="label">{label}</label><input className="input" name={name} type={type} required={required} defaultValue={defaultValue} step={type === "number" ? "0.01" : undefined}/></div>;

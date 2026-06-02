@@ -7,6 +7,7 @@ import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, localDateTime, nullableText, numberValue, text } from "@/lib/erp";
+import { syncAppointmentIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +95,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
         dateTimeValue(formData, "appointmentdate"),
       ],
     );
+    await syncAppointmentIncome(Number(created.rows[0]?.id || 0));
     await recordActivity({
       user: currentUser,
       action: "created",

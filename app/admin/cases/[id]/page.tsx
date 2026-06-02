@@ -8,7 +8,8 @@ import { canDeleteResource, canEditResource, canViewFinance, canViewResource } f
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
-import { createCaseDocumentSignedUrl, deleteCaseDocumentFromStorage, storagePathFromDocumentValue, uploadCaseDocumentToStorage } from "@/lib/supabaseStorage";
+import { deleteCaseAutoIncome, deleteCaseInstallmentIncome, syncAppointmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
+import { deleteCaseDocumentFromStorage, storagePathFromDocumentValue, uploadCaseDocumentToStorage } from "@/lib/supabaseStorage";
 
 export const dynamic = "force-dynamic";
 const MAX_CASE_DOCUMENT_SIZE = 20 * 1024 * 1024;
@@ -147,6 +148,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     );
 
     await syncCaseTotals(caseId);
+    await syncAppointmentIncome(appointmentId);
     await recordActivity({
       user: currentUser,
       action: "updated",
@@ -168,6 +170,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
       `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,NOW(),NOW()) RETURNING id`,
       [caseId, text(formData, "name", "Installment"), String(numberValue(formData, "amount")), dateTimeValue(formData, "time")],
     );
+    await syncCaseInstallmentIncome(Number(created.rows[0]?.id || 0));
     await syncCaseTotals(caseId);
     await recordActivity({
       user: currentUser,
@@ -188,6 +191,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
 
     const installmentId = Number(formData.get("installment_id"));
     const deleted = await getDb().query(`DELETE FROM "case_installments" WHERE id=$1 AND client_case_id=$2 RETURNING id, amount`, [installmentId, caseId]);
+    await deleteCaseInstallmentIncome(installmentId);
     await syncCaseTotals(caseId);
     await recordActivity({
       user: currentUser,
@@ -205,6 +209,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
     if (!currentResource || !canDeleteResource(currentUser, currentResource)) throw new Error("You do not have permission to delete cases.");
+    await deleteCaseAutoIncome(caseId);
     const deleted = await getDb().query(`DELETE FROM "client_cases" WHERE id=$1 RETURNING id, client_id`, [caseId]);
     await recordActivity({
       user: currentUser,
@@ -463,24 +468,18 @@ async function getCaseDocuments(caseId: number) {
     [caseId],
   );
 
-  return Promise.all(result.rows.map(async (document) => ({
+  return result.rows.map((document) => ({
     ...document,
-    href: await getDocumentHref(document.document),
-  })));
+    href: getDocumentHref(caseId, document),
+  }));
 }
 
-async function getDocumentHref(value: unknown) {
-  const document = stringValue(value).trim();
+function getDocumentHref(caseId: number, documentRow: { document: unknown; id: unknown }) {
+  const document = stringValue(documentRow.document).trim();
   if (!document) return "";
   const storagePath = storagePathFromDocumentValue(document);
 
-  if (storagePath) {
-    try {
-      return await createCaseDocumentSignedUrl(storagePath);
-    } catch {
-      return "";
-    }
-  }
+  if (storagePath) return `/admin/cases/${caseId}/documents/${documentRow.id}`;
 
   if (document.startsWith("http://") || document.startsWith("https://") || document.startsWith("/")) return document;
   return "";

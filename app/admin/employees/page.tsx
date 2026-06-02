@@ -57,9 +57,11 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   const canResetPasswords = isAdmin(user);
   const showFinance = canViewFinance(user);
   const q = (params.q || "").trim();
-  const employees = await getEmployees(q);
-  const editEmployee = canEdit && params.edit ? await getEmployeeById(Number(params.edit)) : null;
-  const resetEmployee = canResetPasswords && params.reset ? await getEmployeeById(Number(params.reset)) : null;
+  const [employees, editEmployee, resetEmployee] = await Promise.all([
+    getEmployees(q),
+    canEdit && params.edit ? getEmployeeById(Number(params.edit)) : Promise.resolve(null),
+    canResetPasswords && params.reset ? getEmployeeById(Number(params.reset)) : Promise.resolve(null),
+  ]);
 
   async function createEmployee(formData: FormData) {
     "use server";

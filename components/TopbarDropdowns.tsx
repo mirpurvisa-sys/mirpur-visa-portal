@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Bell, ChevronRight, LayoutDashboard, LogOut, Search, UserRound } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 export type TopbarSearchItem = {
   title: string;
@@ -48,6 +48,7 @@ export function TopbarDropdowns({
   const [loadingScope, setLoadingScope] = useState<TopbarScope | null>(null);
   const loadingRef = useRef<Set<TopbarScope>>(new Set());
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const deferredQuery = useDeferredValue(query);
 
   useEffect(() => {
     try {
@@ -76,16 +77,20 @@ export function TopbarDropdowns({
   }, []);
 
   const filteredSearchItems = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+    const needle = deferredQuery.trim().toLowerCase();
     const matches = needle
       ? searchItems.filter((item) =>
           `${item.title} ${item.subtitle} ${item.group}`.toLowerCase().includes(needle),
         )
       : searchItems;
     return matches.slice(0, 10);
-  }, [query, searchItems]);
+  }, [deferredQuery, searchItems]);
 
-  const unreadCount = notifications.filter((notification) => !readIds.includes(notification.id)).length;
+  const readIdSet = useMemo(() => new Set(readIds), [readIds]);
+  const unreadCount = useMemo(
+    () => notifications.filter((notification) => !readIdSet.has(notification.id)).length,
+    [notifications, readIdSet],
+  );
 
   async function loadTopbarData(scope: TopbarScope) {
     if (loadedScopes.includes(scope) || loadingRef.current.has(scope)) return;
@@ -220,7 +225,7 @@ export function TopbarDropdowns({
                 <div className="topDropdownEmpty">Loading notifications...</div>
               ) : notifications.length ? (
                 notifications.map((notification) => {
-                  const unread = !readIds.includes(notification.id);
+                  const unread = !readIdSet.has(notification.id);
                   return (
                     <Link
                       className={`topDropdownItem notificationItem ${unread ? "unread" : ""}`}

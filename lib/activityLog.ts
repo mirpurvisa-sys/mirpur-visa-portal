@@ -1,3 +1,4 @@
+import { revalidateTag } from "next/cache";
 import { after } from "next/server";
 import type { CurrentUser } from "./auth";
 import { getDb } from "./db";
@@ -51,6 +52,7 @@ export function recordActivity({
           }),
         ],
       );
+      revalidateTag("activity-log", "max");
     } catch (error) {
       console.warn("Unable to record activity log", error);
     }

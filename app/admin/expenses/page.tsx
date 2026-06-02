@@ -7,6 +7,7 @@ import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canViewFinance } from "@/lib/permissions";
 import { dateValue, money, nextExpenseVoucherNo, numberValue, text, today } from "@/lib/erp";
+import { revalidateFinanceCache } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
       `INSERT INTO "expenses" (voucher_no, "Title", "ExpenseType", "Amount", "Description", "Date", created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`,
       [voucherNo, text(formData, "Title"), text(formData, "ExpenseType", "Others"), amount, text(formData, "Description", "--"), dateValue(formData, "Date")],
     );
+    revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "created",
@@ -66,6 +68,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
 
     const expenseId = numberValue(formData, "expense_id");
     const deleted = await getDb().query(`DELETE FROM "expenses" WHERE id=$1 RETURNING id, voucher_no, "Amount" AS amount`, [expenseId]);
+    revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "deleted",

@@ -7,14 +7,39 @@ import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { deleteAppointmentIncome, syncAppointmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
 type AppointmentSearchParams = {
+  delete?: string;
+  edit?: string;
   q?: string;
   new?: string;
+  page?: string;
+  pageSize?: string;
   start_case?: string;
 };
+
+type AppointmentRow = {
+  id: number;
+  caseId: number | null;
+  category: string;
+  categoryLabel: string;
+  dateTimeInput: string;
+  displayDate: string;
+  fee: string;
+  feeDisplay: string;
+  firstname: string;
+  lastname: string;
+  phone: string;
+  statusInputValue: string;
+  statusLabel: string;
+};
+
+const APPOINTMENT_PAGE_SIZES = [10, 25, 50];
+const APPOINTMENT_TYPE_OPTIONS = [{ value: "visit", label: "Visit" }, { value: "online", label: "Online" }, { value: "physical", label: "Physical" }];
+const APPOINTMENT_STATUS_OPTIONS = ["Paid", "Unpaid"];
 
 export default async function AppointmentsPage({ searchParams }: { searchParams: Promise<AppointmentSearchParams> }) {
   const user = await requireUser();
@@ -30,17 +55,27 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   const showFinance = canViewFinance(user);
   const params = await searchParams;
   const query = textFromValue(params.q, "");
+  const pageSize = parsePageSize(params.pageSize);
+  const currentPage = parsePositiveInt(params.page, 1);
   const startCaseId = Number(params.start_case || 0);
+  const editAppointmentId = Number(params.edit || 0);
+  const deleteAppointmentId = Number(params.delete || 0);
   const defaultDateTime = localDateTime();
   const defaultDate = defaultDateTime.slice(0, 10);
+  const listHref = appointmentListHref({ q: query, page: currentPage, pageSize });
 
-  const [appointments, employees, startCaseAppointment] = await Promise.all([
-    getAppointments(query),
-    employeeOptions(),
+  const [appointments, startCaseAppointment, editAppointment, deleteTarget] = await Promise.all([
+    getAppointments(query, currentPage, pageSize),
     startCaseId > 0 ? getAppointmentCaseSeed(startCaseId) : Promise.resolve(null),
+    canEdit && editAppointmentId > 0 ? getAppointmentCaseSeed(editAppointmentId) : Promise.resolve(null),
+    canDelete && deleteAppointmentId > 0 ? getAppointmentCaseSeed(deleteAppointmentId) : Promise.resolve(null),
   ]);
 
   if (startCaseAppointment?.case_id) redirect(`/admin/cases/${startCaseAppointment.case_id}`);
+  if (appointments.total > 0 && currentPage > appointments.totalPages) {
+    redirect(appointmentListHref({ q: query, page: appointments.totalPages, pageSize }));
+  }
+  const employees = startCaseAppointment && canStartCase ? await employeeOptions() : [];
 
   async function createAppointment(formData: FormData) {
     "use server";
@@ -99,6 +134,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         now,
       ],
     );
+    await syncAppointmentIncome(Number(created.rows[0]?.id || 0));
     await recordActivity({
       user: currentUser,
       action: "created",
@@ -133,6 +169,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         appointmentId,
       ],
     );
+    await syncAppointmentIncome(appointmentId);
     await recordActivity({
       user: currentUser,
       action: "updated",
@@ -155,6 +192,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     if (Number(linked.rows[0]?.count || 0) > 0) throw new Error("This appointment is linked to a case. Edit the case instead of deleting the appointment.");
 
     const deleted = await getDb().query(`DELETE FROM "appointments" WHERE id=$1 RETURNING id, client_id`, [appointmentId]);
+    await deleteAppointmentIncome(appointmentId);
     await recordActivity({
       user: currentUser,
       action: "deleted",
@@ -230,17 +268,20 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
     const caseId = Number(caseResult.rows[0].id);
     if (receivedAppointmentFee > 0) {
-      await db.query(
-        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+      const appointmentInstallment = await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5) RETURNING id`,
         [caseId, "Appointment Fee", String(receivedAppointmentFee), dateTimeInput(seed.appointmentdate) || localDateTime(), now],
       );
+      await syncAppointmentIncome(appointmentId);
+      await syncCaseInstallmentIncome(Number(appointmentInstallment.rows[0]?.id || 0));
     }
 
     if (advance > 0) {
-      await db.query(
-        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+      const advanceInstallment = await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5) RETURNING id`,
         [caseId, "Advance Payment", String(advance), localDateTime(), now],
       );
+      await syncCaseInstallmentIncome(Number(advanceInstallment.rows[0]?.id || 0));
     }
 
     await syncCaseTotals(caseId);
@@ -263,16 +304,31 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     </div>
 
     <div className="appointmentTopActions">
-      {canCreate ? <Link className="btn btnPrimary" href="/admin/appointments?new=appointment">New Client &amp; Appointment</Link> : null}
+      {canCreate ? <Link className="btn btnPrimary" href={appointmentListHref({ q: query, page: currentPage, pageSize, new: "appointment" })}>New Client &amp; Appointment</Link> : null}
     </div>
 
-    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} /> : null}
-    {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} /> : null}
+    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} /> : null}
+    {canEdit && editAppointment ? <AppointmentEditModal action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} /> : null}
+    {canDelete && deleteTarget ? <DeleteAppointmentModal action={deleteAppointment} appointment={deleteTarget} closeHref={listHref} /> : null}
+    {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} closeHref={listHref} /> : null}
 
     <section className="panel tableWrap appointmentPanel">
       <form className="legacySearch">
+        <input type="hidden" name="pageSize" value={pageSize} />
         <label>Search:<input className="input" name="q" defaultValue={query} /></label>
       </form>
+      <div className="tableControlBar">
+        <p className="muted">Showing {appointments.rows.length ? appointments.start : 0}-{appointments.end} of {appointments.total} appointments</p>
+        <form className="pageSizeForm">
+          {query ? <input type="hidden" name="q" value={query} /> : null}
+          <label>Rows:
+            <select className="input smallSelect" name="pageSize" defaultValue={pageSize}>
+              {APPOINTMENT_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <button className="btn" type="submit">Apply</button>
+        </form>
+      </div>
       <table className="table dataTable appointmentLegacyTable">
         <thead>
           <tr>
@@ -289,49 +345,38 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
           </tr>
         </thead>
         <tbody>
-          {appointments.length === 0 ? <tr><td colSpan={canEditAppointmentPayments ? 10 : 8} className="emptyState">No data available in table</td></tr> : appointments.map((item) => (
+          {appointments.rows.length === 0 ? <tr><td colSpan={canEditAppointmentPayments ? 10 : 8} className="emptyState">No data available in table</td></tr> : appointments.rows.map((item) => (
             <tr key={item.id}>
               <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
               <td>{item.id}</td>
               <td>{item.firstname} {item.lastname}</td>
               <td>{item.phone}</td>
-              <td>{displayDateTime(item.appointmentdate)}</td>
-              {canEditAppointmentPayments ? <td>{moneyValue(item.fee)}</td> : null}
-              {canEditAppointmentPayments ? <td>{appointmentStatusLabel(item.appointmentstatus)}</td> : null}
-              <td>{appointmentTypeLabel(item.category)}</td>
+              <td>{item.displayDate}</td>
+              {canEditAppointmentPayments ? <td>{item.feeDisplay}</td> : null}
+              {canEditAppointmentPayments ? <td>{item.statusLabel}</td> : null}
+              <td>{item.categoryLabel}</td>
               <td>
                 <div className="actionStack vertical">
-                  <Link className="actionBtn view" href={item.case_id ? `/admin/cases/${item.case_id}` : `/admin/appointments?start_case=${item.id}`} aria-label="Open appointment">
+                  <Link className="actionBtn view" href={item.caseId ? `/admin/cases/${item.caseId}` : appointmentListHref({ q: query, page: currentPage, pageSize, start_case: item.id })} aria-label="Open appointment">
                     <Eye size={18} />
                   </Link>
-                  {canEdit ? <details className="rowDetails">
-                    <summary className="actionBtn edit" aria-label="Edit appointment"><Pencil size={18} /></summary>
-                    <form action={updateAppointment} className="rowEditForm">
-                      <input type="hidden" name="id" value={item.id} />
-                      {canEditAppointmentPayments ? <>
-                        <label><span className="srOnly">Fee</span><input className="input" name="fee" type="number" step="0.01" defaultValue={item.fee} required /></label>
-                        <label><span className="srOnly">Status</span><select className="input" name="appointmentstatus" defaultValue={appointmentStatusInputValue(item.appointmentstatus)}>{["Paid", "Unpaid"].map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
-                      </> : null}
-                      <label><span className="srOnly">Category</span><select className="input" name="category" defaultValue={item.category}>{appointmentTypeOptions().map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-                      <label><span className="srOnly">Appointment date</span><input className="input" name="appointmentdate" type="datetime-local" defaultValue={dateTimeInput(item.appointmentdate)} required /></label>
-                      <button className="btn btnPrimary">Save</button>
-                    </form>
-                  </details> : null}
-                  {canDelete ? <form action={deleteAppointment}><input type="hidden" name="id" value={item.id} /><button className="actionBtn delete" disabled={Boolean(item.case_id)} aria-label="Delete appointment"><Trash2 size={18} /></button></form> : null}
+                  {canEdit ? <Link className="actionBtn edit" href={appointmentListHref({ q: query, page: currentPage, pageSize, edit: item.id })} aria-label="Edit appointment"><Pencil size={18} /></Link> : null}
+                  {canDelete ? item.caseId ? <button className="actionBtn delete" disabled aria-label="Delete appointment"><Trash2 size={18} /></button> : <Link className="actionBtn delete" href={appointmentListHref({ q: query, page: currentPage, pageSize, delete: item.id })} aria-label="Delete appointment"><Trash2 size={18} /></Link> : null}
                 </div>
               </td>
               <td>
-                {!item.case_id && canStartCase ? <Link className="actionBtn start" href={`/admin/appointments?start_case=${item.id}`} aria-label="Start case"><Plus size={22} /></Link> : <span className="caseStartedText">Case already started</span>}
+                {!item.caseId && canStartCase ? <Link className="actionBtn start" href={appointmentListHref({ q: query, page: currentPage, pageSize, start_case: item.id })} aria-label="Start case"><Plus size={22} /></Link> : <span className="caseStartedText">Case already started</span>}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <PaginationControls currentPage={appointments.page} pageSize={pageSize} query={query} totalPages={appointments.totalPages} />
     </section>
   </>;
 }
 
-async function getAppointments(query: string) {
+async function getAppointments(query: string, page: number, pageSize: number) {
   const values: unknown[] = [];
   let where = "";
   if (query) {
@@ -345,20 +390,55 @@ async function getAppointments(query: string) {
          OR CAST(a.id AS TEXT) ILIKE $1
     `;
   }
+  const limitIndex = values.length + 1;
+  const offsetIndex = values.length + 2;
+  const offset = (page - 1) * pageSize;
 
-  const result = await getDb().query(
-    `
-      SELECT a.*, c.firstname, c.lastname, c.phone, cc.id AS case_id
+  const db = getDb();
+  const countQuery = query
+    ? `
+      SELECT COUNT(*)::int AS total
       FROM "appointments" a
       JOIN "clients" c ON c.id = a.client_id
-      LEFT JOIN "client_cases" cc ON cc.appointment_id = a.id
       ${where}
-      ORDER BY a.appointmentdate DESC, a.id DESC
-      LIMIT 80
-    `,
-    values,
-  );
-  return result.rows;
+    `
+    : `SELECT COUNT(*)::int AS total FROM "appointments"`;
+  const [result, countResult] = await Promise.all([
+    db.query(
+      `
+        SELECT
+          a.id,
+          a.fee,
+          a.appointmentstatus,
+          a.category,
+          a.appointmentdate,
+          c.firstname,
+          c.lastname,
+          c.phone,
+          cc.id AS case_id
+        FROM "appointments" a
+        JOIN "clients" c ON c.id = a.client_id
+        LEFT JOIN "client_cases" cc ON cc.appointment_id = a.id
+        ${where}
+        ORDER BY a.appointmentdate DESC NULLS LAST, a.id DESC
+        LIMIT $${limitIndex} OFFSET $${offsetIndex}
+      `,
+      [...values, pageSize, offset],
+    ),
+    db.query(countQuery, values),
+  ]);
+  const rows = result.rows.map(toAppointmentRow);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return {
+    end: rows.length ? offset + rows.length : 0,
+    page,
+    pageSize,
+    rows,
+    start: rows.length ? offset + 1 : 0,
+    total,
+    totalPages,
+  };
 }
 
 async function getAppointmentCaseSeed(appointmentId: number) {
@@ -386,10 +466,20 @@ async function getAppointmentCaseSeed(appointmentId: number) {
   return result.rows[0] ?? null;
 }
 
-function AppointmentModal({ action, canEditAppointmentPayments, defaultDateTime }: { action: (formData: FormData) => Promise<void>; canEditAppointmentPayments: boolean; defaultDateTime: string }) {
+function AppointmentModal({
+  action,
+  canEditAppointmentPayments,
+  closeHref,
+  defaultDateTime,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  canEditAppointmentPayments: boolean;
+  closeHref: string;
+  defaultDateTime: string;
+}) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal appointmentCreateModal">
-      <Link className="modalClose" href="/admin/appointments" aria-label="Close">×</Link>
+      <Link className="modalClose" href={closeHref} aria-label="Close">x</Link>
       <h2>New Appointment</h2>
       <div className="modalDivider" />
       <div className="modalGrid">
@@ -416,10 +506,10 @@ function AppointmentModal({ action, canEditAppointmentPayments, defaultDateTime 
           <div className="uploadMock">⇧<span>Drag and drop a file here<br />or click</span></div>
         </div>
         <Field name="destination_country" label="Destination Country" />
-        <Select name="category" label="Appointment Category" options={appointmentTypeOptions()} defaultValue="visit" />
+        <Select name="category" label="Appointment Category" options={APPOINTMENT_TYPE_OPTIONS} defaultValue="visit" />
         <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={defaultDateTime} required />
         {canEditAppointmentPayments ? <>
-          <Select name="appointmentstatus" label="Status" options={["Paid", "Unpaid"]} defaultValue="Unpaid" />
+          <Select name="appointmentstatus" label="Status" options={APPOINTMENT_STATUS_OPTIONS} defaultValue="Unpaid" />
           <Field name="fee" label="Appointment Fee" type="number" defaultValue="0" required />
         </> : null}
       </div>
@@ -428,15 +518,77 @@ function AppointmentModal({ action, canEditAppointmentPayments, defaultDateTime 
   </div>;
 }
 
+function AppointmentEditModal({
+  action,
+  appointment,
+  canEditAppointmentPayments,
+  closeHref,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  appointment: AppointmentRow;
+  canEditAppointmentPayments: boolean;
+  closeHref: string;
+}) {
+  return <div className="modalOverlay">
+    <form action={action} className="mvcModal appointmentEditModal">
+      <Link className="modalClose" href={closeHref} aria-label="Close">x</Link>
+      <h2>Edit Appointment</h2>
+      <div className="modalDivider" />
+      <input type="hidden" name="id" value={appointment.id} />
+      <div className="modalGrid compactModalGrid">
+        <Field name="client_display" label="Client" defaultValue={`${appointment.firstname} ${appointment.lastname}`.trim() || "-"} readOnly />
+        <Field name="phone_display" label="Phone" defaultValue={appointment.phone} readOnly />
+        {canEditAppointmentPayments ? <>
+          <Field name="fee" label="Fee" type="number" defaultValue={appointment.fee} required />
+          <Select name="appointmentstatus" label="Status" options={APPOINTMENT_STATUS_OPTIONS} defaultValue={appointment.statusInputValue} />
+        </> : null}
+        <Select name="category" label="Category" options={APPOINTMENT_TYPE_OPTIONS} defaultValue={appointment.category} />
+        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={appointment.dateTimeInput} required />
+      </div>
+      <button className="btn btnPrimary modalSubmit">Save Appointment</button>
+    </form>
+  </div>;
+}
+
+function DeleteAppointmentModal({
+  action,
+  appointment,
+  closeHref,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  appointment: NonNullable<Awaited<ReturnType<typeof getAppointmentCaseSeed>>>;
+  closeHref: string;
+}) {
+  const clientName = `${appointment.firstname || ""} ${appointment.lastname || ""}`.trim() || `Appointment #${appointment.id}`;
+  const linkedToCase = Boolean(appointment.case_id);
+
+  return <div className="modalOverlay">
+    <form action={action} className="mvcModal deleteConfirmModal">
+      <Link className="modalClose" href={closeHref} aria-label="Close">x</Link>
+      <h2>Delete Appointment</h2>
+      <div className="modalDivider" />
+      <input type="hidden" name="id" value={appointment.id} />
+      <p className="muted">This will delete the appointment for <strong>{clientName}</strong>.</p>
+      {linkedToCase ? <div className="notice errorNotice modalNotice">This appointment is linked to a case. Open the case instead of deleting the appointment.</div> : null}
+      <div className="modalActionRow">
+        <Link className="btn" href={closeHref}>Cancel</Link>
+        <button className="btn dangerButton" disabled={linkedToCase}>Delete</button>
+      </div>
+    </form>
+  </div>;
+}
+
 function StartCaseModal({
   action,
   appointment,
+  closeHref,
   defaultDate,
   employees,
   showFinance,
 }: {
   action: (formData: FormData) => Promise<void>;
   appointment: NonNullable<Awaited<ReturnType<typeof getAppointmentCaseSeed>>>;
+  closeHref: string;
   defaultDate: string;
   employees: Awaited<ReturnType<typeof employeeOptions>>;
   showFinance: boolean;
@@ -444,7 +596,7 @@ function StartCaseModal({
   const clientName = `${appointment.firstname || ""} ${appointment.lastname || ""}`.trim();
   return <div className="modalOverlay">
     <form action={action} className="mvcModal caseStartModal">
-      <Link className="modalClose" href="/admin/appointments" aria-label="Close">×</Link>
+      <Link className="modalClose" href={closeHref} aria-label="Close">x</Link>
       <h2>New Case</h2>
       <div className="modalDivider" />
       <input type="hidden" name="appointment_id" value={appointment.id} />
@@ -533,12 +685,81 @@ function EmployeeSelect({ employees }: { employees: Awaited<ReturnType<typeof em
   </div>;
 }
 
+function PaginationControls({
+  currentPage,
+  pageSize,
+  query,
+  totalPages,
+}: {
+  currentPage: number;
+  pageSize: number;
+  query: string;
+  totalPages: number;
+}) {
+  if (totalPages <= 1) return null;
+  const previousPage = Math.max(1, currentPage - 1);
+  const nextPage = Math.min(totalPages, currentPage + 1);
+
+  return <nav className="paginationBar" aria-label="Appointments pages">
+    {currentPage > 1 ? <Link className="btn" href={appointmentListHref({ q: query, page: previousPage, pageSize })}>Previous</Link> : <span className="btn disabledBtn">Previous</span>}
+    <span>Page {currentPage} of {totalPages}</span>
+    {currentPage < totalPages ? <Link className="btn" href={appointmentListHref({ q: query, page: nextPage, pageSize })}>Next</Link> : <span className="btn disabledBtn">Next</span>}
+  </nav>;
+}
+
 function AccessDenied() {
   return <div className="panel"><h1>Appointments</h1><p className="muted">You do not have permission to access appointments.</p></div>;
 }
 
-function appointmentTypeOptions() {
-  return [{ value: "visit", label: "Visit" }, { value: "online", label: "Online" }, { value: "physical", label: "Physical" }];
+function toAppointmentRow(row: Record<string, any>): AppointmentRow {
+  const category = textFromValue(row.category, "visit");
+  const statusInputValue = appointmentStatusInputValue(row.appointmentstatus);
+  return {
+    id: Number(row.id || 0),
+    caseId: row.case_id ? Number(row.case_id) : null,
+    category,
+    categoryLabel: appointmentTypeLabel(category),
+    dateTimeInput: dateTimeInput(row.appointmentdate),
+    displayDate: displayDateTime(row.appointmentdate),
+    fee: moneyValue(row.fee),
+    feeDisplay: moneyValue(row.fee),
+    firstname: textFromValue(row.firstname, ""),
+    lastname: textFromValue(row.lastname, ""),
+    phone: textFromValue(row.phone, "-"),
+    statusInputValue,
+    statusLabel: appointmentStatusLabel(statusInputValue),
+  };
+}
+
+function appointmentListHref(params: {
+  delete?: number;
+  edit?: number;
+  new?: string;
+  page: number;
+  pageSize: number;
+  q: string;
+  start_case?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.page > 1) search.set("page", String(params.page));
+  if (params.pageSize !== APPOINTMENT_PAGE_SIZES[0]) search.set("pageSize", String(params.pageSize));
+  if (params.new) search.set("new", params.new);
+  if (params.start_case) search.set("start_case", String(params.start_case));
+  if (params.edit) search.set("edit", String(params.edit));
+  if (params.delete) search.set("delete", String(params.delete));
+  const queryString = search.toString();
+  return queryString ? `/admin/appointments?${queryString}` : "/admin/appointments";
+}
+
+function parsePageSize(value: unknown) {
+  const parsed = Number(value);
+  return APPOINTMENT_PAGE_SIZES.includes(parsed) ? parsed : APPOINTMENT_PAGE_SIZES[0];
+}
+
+function parsePositiveInt(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function appointmentTypeLabel(value: unknown) {

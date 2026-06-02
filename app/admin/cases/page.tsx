@@ -7,6 +7,7 @@ import { canDeleteResource, canEditResource, canViewFinance, canViewResource } f
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
+import { deleteCaseAutoIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
     if (!currentResource || !canDeleteResource(currentUser, currentResource)) throw new Error("You do not have permission to delete cases.");
     const caseId = Number(formData.get("id") || 0);
     if (!Number.isFinite(caseId) || caseId <= 0) throw new Error("Invalid case.");
+    await deleteCaseAutoIncome(caseId);
     await getDb().query(`DELETE FROM "case_installments" WHERE client_case_id=$1`, [caseId]);
     const deleted = await getDb().query(`DELETE FROM "client_cases" WHERE id=$1 RETURNING id, client_id`, [caseId]);
     await recordActivity({

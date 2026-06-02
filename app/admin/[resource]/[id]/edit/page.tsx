@@ -7,6 +7,7 @@ import { ResourceForm } from "@/components/ResourceForm";
 import { requireUser } from "@/lib/auth";
 import { changedFields, recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
+import { revalidateFinanceCache } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "edit"), "edit"); delete data.created_at;
     const updated = await delegate(res.model).update({ where: parseRecordWhere(res, id), data });
+    if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "updated",
@@ -47,6 +49,7 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const currentUser = await requireUser();
     if(!canDeleteResource(currentUser, res)) throw new Error("You do not have permission to delete this record.");
     const deleted = await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
+    if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "deleted",
@@ -78,4 +81,8 @@ function AccessDenied({ title, message }: { title: string; message: string }) {
     <h1>{title}</h1>
     <p className="muted">{message}</p>
   </div>;
+}
+
+function shouldRevalidateFinance(resourceKey: string) {
+  return resourceKey === "incomes" || resourceKey === "expenses" || resourceKey === "case-installments";
 }

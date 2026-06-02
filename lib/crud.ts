@@ -12,8 +12,9 @@ export function delegate(table: string): any {
       return result.rows[0]?.count ?? 0;
     },
 
-    async findMany({ where, take = 50, orderBy }: { where?: AnyObj; take?: number; orderBy?: AnyObj } = {}) {
-      const query = buildSelect(table, ["*"], where);
+    async findMany({ columns, where, take = 50, orderBy }: { columns?: string[]; where?: AnyObj; take?: number; orderBy?: AnyObj } = {}) {
+      const selectedColumns = columns?.length ? columns.map(quoteIdent) : ["*"];
+      const query = buildSelect(table, selectedColumns, where);
       const orderSql = buildOrderSql(orderBy);
       const limitIndex = query.values.length + 1;
       const result = await getDb().query(`${query.sql}${orderSql} LIMIT $${limitIndex}`, [...query.values, take]);

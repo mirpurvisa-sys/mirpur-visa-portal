@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
 import { nextExpenseVoucherNo } from "@/lib/erp";
 import { canCreateResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
+import { revalidateFinanceCache } from "@/lib/finance";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "create"), "create");
     if (res.key === "expenses") data.voucher_no = await nextExpenseVoucherNo();
     const created = await delegate(res.model).create({ data });
+    if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
       action: "created",
@@ -58,4 +60,8 @@ function AccessDenied({ title, message }: { title: string; message: string }) {
     <h1>{title}</h1>
     <p className="muted">{message}</p>
   </div>;
+}
+
+function shouldRevalidateFinance(resourceKey: string) {
+  return resourceKey === "incomes" || resourceKey === "expenses" || resourceKey === "case-installments";
 }

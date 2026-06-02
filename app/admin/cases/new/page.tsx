@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
+import { syncAppointmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +92,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
           appointmentIdForCase,
         ],
       );
+      await syncAppointmentIncome(appointmentIdForCase);
     } else {
       const appointment = await db.query(
         `
@@ -108,6 +110,7 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
         ],
       );
       appointmentIdForCase = Number(appointment.rows[0].id);
+      await syncAppointmentIncome(appointmentIdForCase);
     }
 
     const receivedAppointmentFee = isPaidStatus(appointmentStatus) ? appointmentFee : 0;
@@ -155,16 +158,18 @@ export default async function NewCasePage({ searchParams }: { searchParams: Prom
 
     const caseId = Number(caseResult.rows[0].id);
     if (receivedAppointmentFee > 0) {
-      await db.query(
-        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+      const appointmentInstallment = await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5) RETURNING id`,
         [caseId, "Appointment Fee", String(receivedAppointmentFee), appointmentDate, now],
       );
+      await syncCaseInstallmentIncome(Number(appointmentInstallment.rows[0]?.id || 0));
     }
     if (initialPayment > 0) {
-      await db.query(
-        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5)`,
+      const initialInstallment = await db.query(
+        `INSERT INTO "case_installments" (client_case_id, name, amount, time, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$5) RETURNING id`,
         [caseId, text(formData, "installment_name", "Initial payment"), String(initialPayment), dateTimeValue(formData, "installment_time"), now],
       );
+      await syncCaseInstallmentIncome(Number(initialInstallment.rows[0]?.id || 0));
     }
     await syncCaseTotals(caseId);
     await recordActivity({

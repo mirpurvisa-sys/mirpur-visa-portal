@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
+import { unstable_cache } from "next/cache";
 import { BriefcaseBusiness, CircleDollarSign, UsersRound, WalletCards } from "lucide-react";
-import { DashboardLiveWidgets } from "@/components/DashboardLiveWidgets";
+import { DashboardLiveWidgets, DashboardLiveWidgetsSkeleton } from "@/components/DashboardLiveWidgets";
 import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { canCreateResource, canViewFinance, canViewResource } from "@/lib/permissions";
@@ -46,7 +48,7 @@ export default async function AdminDashboard() {
     <div className="summaryGrid">
       <SummaryCard icon={<UsersRound size={54} />} title="Clients" lines={[`Total: ${stats.clients}`, `Today's: ${stats.todayClients}`]} href={canViewResource(user, "clients") ? "/admin/clients" : "/admin/cases"} />
       {showFinance ? <>
-        <SummaryCard icon={<WalletCards size={58} />} title="Total Income" lines={[`This Month: ${money(stats.monthIncome)}`, `Today's: ${money(stats.todayIncome)}`]} href="/admin/payments?tab=income" />
+        <SummaryCard icon={<WalletCards size={58} />} title="Total Income" lines={[`Total: ${money(stats.totalIncome)}`, `This Month: ${money(stats.monthIncome)}`, `Today's: ${money(stats.todayIncome)}`]} href="/admin/payments?tab=income" />
         <SummaryCard icon={<CircleDollarSign size={58} />} title="Total Expense" lines={[`This Month: ${money(stats.monthExpense)}`, `Today's: ${money(stats.todayExpense)}`]} href="/admin/expenses" />
       </> : null}
       <SummaryCard icon={<BriefcaseBusiness size={56} />} title="Employees" lines={[`Total: ${stats.employees}`]} href="/admin/employees" />
@@ -67,7 +69,9 @@ export default async function AdminDashboard() {
         <MoneyTrailChart data={moneyTrail} />
       </section> : null}
 
-      <DashboardLiveWidgets />
+      <Suspense fallback={<DashboardLiveWidgetsSkeleton />}>
+        <DashboardLiveWidgets />
+      </Suspense>
     </div>
 
     <div className="lowerGrid">
@@ -186,39 +190,56 @@ function DashboardList({ title, href, actionLabel, canCreate, items, emptyText }
   </section>;
 }
 
-async function getDashboardStats(includeFinance: boolean) {
-  const result = await getDb().query(`
+const getDashboardStats = unstable_cache(async function getDashboardStats(includeFinance: boolean) {
+  const basePromise = getDb().query(`
     SELECT
       (SELECT COUNT(*)::int FROM "clients") AS clients,
       (SELECT COUNT(*)::int FROM "clients" WHERE created_at::date = ${APP_TODAY_SQL}) AS today_clients,
       (SELECT COUNT(*)::int FROM "employees") AS employees
   `);
-  const base = result.rows[0] || {};
-  if (!includeFinance) {
-    return { clients: Number(base.clients || 0), todayClients: Number(base.today_clients || 0), employees: Number(base.employees || 0), monthIncome: 0, todayIncome: 0, monthExpense: 0, todayExpense: 0 };
-  }
-
-  const finance = await getDb().query(`
+  const financePromise = includeFinance ? getDb().query(`
     WITH ${RECEIVED_INCOME_CTE}
     SELECT
-      (SELECT COALESCE(SUM(amount), 0) FROM received_income WHERE date_trunc('month', received_on) = date_trunc('month', ${APP_TODAY_SQL})) AS month_income,
-      (SELECT COALESCE(SUM(amount), 0) FROM received_income WHERE received_on = ${APP_TODAY_SQL}) AS today_income,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE date_trunc('month', "Date") = date_trunc('month', ${APP_TODAY_SQL})) AS month_expense,
-      (SELECT COALESCE(SUM("Amount"), 0) FROM "expenses" WHERE "Date"::date = ${APP_TODAY_SQL}) AS today_expense
-  `);
-  const row = finance.rows[0] || {};
+      income.total_income,
+      income.month_income,
+      income.today_income,
+      expense.month_expense,
+      expense.today_expense
+    FROM (
+      SELECT
+        COALESCE(SUM(amount), 0) AS total_income,
+        COALESCE(SUM(amount) FILTER (WHERE date_trunc('month', received_on) = date_trunc('month', ${APP_TODAY_SQL})), 0) AS month_income,
+        COALESCE(SUM(amount) FILTER (WHERE received_on = ${APP_TODAY_SQL}), 0) AS today_income
+      FROM received_income
+    ) income
+    CROSS JOIN (
+      SELECT
+        COALESCE(SUM("Amount") FILTER (WHERE date_trunc('month', "Date") = date_trunc('month', ${APP_TODAY_SQL})), 0) AS month_expense,
+        COALESCE(SUM("Amount") FILTER (WHERE "Date"::date = ${APP_TODAY_SQL}), 0) AS today_expense
+      FROM "expenses"
+    ) expense
+  `) : Promise.resolve(null);
+
+  const [result, finance] = await Promise.all([basePromise, financePromise]);
+  const base = result.rows[0] || {};
+  if (!includeFinance) {
+    return { clients: Number(base.clients || 0), todayClients: Number(base.today_clients || 0), employees: Number(base.employees || 0), totalIncome: 0, monthIncome: 0, todayIncome: 0, monthExpense: 0, todayExpense: 0 };
+  }
+
+  const row = finance?.rows[0] || {};
   return {
     clients: Number(base.clients || 0),
     todayClients: Number(base.today_clients || 0),
     employees: Number(base.employees || 0),
+    totalIncome: Number(row.total_income || 0),
     monthIncome: Number(row.month_income || 0),
     todayIncome: Number(row.today_income || 0),
     monthExpense: Number(row.month_expense || 0),
     todayExpense: Number(row.today_expense || 0),
   };
-}
+}, ["dashboard-stats-v3"], { revalidate: 60, tags: ["finance"] });
 
-async function getMoneyTrail(): Promise<MoneyPoint[]> {
+const getMoneyTrail = unstable_cache(async function getMoneyTrail(): Promise<MoneyPoint[]> {
   const result = await getDb().query(`
     WITH ${RECEIVED_INCOME_CTE},
     months AS (
@@ -257,7 +278,7 @@ async function getMoneyTrail(): Promise<MoneyPoint[]> {
     income: Number(row.income || 0),
     expense: Number(row.expense || 0),
   }));
-}
+}, ["dashboard-money-trail-v3"], { revalidate: 60, tags: ["finance"] });
 
 async function getTodayActivities(): Promise<DashboardItem[]> {
   const result = await getDb().query(`

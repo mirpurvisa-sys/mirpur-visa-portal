@@ -5,9 +5,10 @@ type PgPool = {
   query: (text: string, values?: any[]) => Promise<QueryResult>;
 };
 
-const globalForPg = globalThis as unknown as { pgPool?: PgPool };
+const globalForPg = globalThis as unknown as { pgPool?: PgPool; pgDateParsersConfigured?: boolean };
 
 export function getDb(): PgPool {
+  configurePgDateParsers();
   if (!globalForPg.pgPool) {
     globalForPg.pgPool = new pg.Pool({
       connectionString: withoutSslMode(process.env.DATABASE_URL || ""),
@@ -20,6 +21,15 @@ export function getDb(): PgPool {
   }
 
   return globalForPg.pgPool;
+}
+
+function configurePgDateParsers() {
+  if (globalForPg.pgDateParsersConfigured) return;
+  // Keep date-only and timestamp-without-time-zone values in database-local form.
+  // JS Date converts them through UTC, which made many date columns display one day behind.
+  pg.types.setTypeParser(1082, (value: string) => value);
+  pg.types.setTypeParser(1114, (value: string) => value);
+  globalForPg.pgDateParsersConfigured = true;
 }
 
 function withoutSslMode(value: string) {

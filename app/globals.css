@@ -774,6 +774,34 @@ input, select, textarea { outline: none; }
   color: var(--mvc-muted);
   font-size: 12px;
 }
+.widgetSkeletonCard .skeletonLine,
+.widgetSkeletonCard .skeletonBox,
+.widgetSkeletonCard .skeletonInput {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e9eef4 25%, #f7f9fb 37%, #e9eef4 63%);
+  background-size: 400% 100%;
+  animation: skeletonPulse 1.2s ease-in-out infinite;
+}
+.widgetSkeletonCard .skeletonLine {
+  width: 62%;
+  height: 14px;
+  margin-top: 10px;
+}
+.widgetSkeletonCard .skeletonLine.wide { width: 82%; height: 22px; }
+.widgetSkeletonCard .skeletonLine.centered { width: 48%; margin: 0 auto 22px; }
+.widgetSkeletonCard .skeletonBox {
+  width: 100%;
+  height: 62px;
+}
+.widgetSkeletonCard .skeletonInput {
+  width: 100%;
+  min-height: 38px;
+}
+@keyframes skeletonPulse {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
 .lowerGrid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 24px; margin-top: 72px; }
 .lowerGrid .portalCard { min-height: 94px; }
 .dashboardListCard {
@@ -1089,6 +1117,78 @@ input, select, textarea { outline: none; }
 .appointmentLegacyTable .tableAvatar {
   width: 58px;
   height: 58px;
+}
+.tableControlBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pageSizeForm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pageSizeForm label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--mvc-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+.paginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 14px;
+  color: var(--mvc-muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+.disabledBtn {
+  color: #94a3b8;
+  background: #f1f5f9;
+  cursor: default;
+  pointer-events: none;
+}
+.modalActionRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+.loadingTable .skeletonLine,
+.tableControlBar .skeletonLine,
+.tableControlBar .skeletonInput,
+.loadingTable .skeletonAvatar {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e9eef4 25%, #f7f9fb 37%, #e9eef4 63%);
+  background-size: 400% 100%;
+  animation: skeletonPulse 1.2s ease-in-out infinite;
+}
+.loadingTable .skeletonLine {
+  width: 100%;
+  height: 14px;
+}
+.tableControlBar .skeletonLine {
+  width: 240px;
+  height: 16px;
+}
+.tableControlBar .skeletonLine.wide { width: 320px; }
+.tableControlBar .skeletonInput {
+  width: 160px;
+  height: 38px;
+}
+.loadingTable .skeletonAvatar {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
 }
 .caseStartedText {
   display: inline-block;

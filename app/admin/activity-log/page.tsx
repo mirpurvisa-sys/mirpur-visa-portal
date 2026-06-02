@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { Activity, Clock3, Database, Fingerprint, Search, UserRound } from "lucide-react";
 import { getResource } from "@/lib/adminConfig";
 import { requireUser } from "@/lib/auth";
@@ -210,7 +211,7 @@ async function getActivityLogs(query: string, type: string) {
   return result.rows as ActivityLogRow[];
 }
 
-async function getActivityStats(): Promise<ActivityStats> {
+const getActivityStats = unstable_cache(async function getActivityStats(): Promise<ActivityStats> {
   const result = await getDb().query(`
     SELECT
       COUNT(*)::int AS total,
@@ -226,9 +227,9 @@ async function getActivityStats(): Promise<ActivityStats> {
     system: Number(row.system || 0),
     actors: Number(row.actors || 0),
   };
-}
+}, ["activity-log-stats-v2"], { revalidate: 60, tags: ["activity-log"] });
 
-async function getActivityFilters() {
+const getActivityFilters = unstable_cache(async function getActivityFilters() {
   const result = await getDb().query(`
     SELECT COALESCE(NULLIF(log_name, ''), 'general') AS name, COUNT(*)::int AS count
     FROM "activity_log"
@@ -237,7 +238,7 @@ async function getActivityFilters() {
     LIMIT 12
   `);
   return result.rows.map((row) => ({ name: String(row.name || "general"), count: Number(row.count || 0) }));
-}
+}, ["activity-log-filters-v2"], { revalidate: 60, tags: ["activity-log"] });
 
 function AccessDenied() {
   return (
