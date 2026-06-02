@@ -779,9 +779,7 @@ input, select, textarea { outline: none; }
 .widgetSkeletonCard .skeletonInput {
   display: block;
   border-radius: 4px;
-  background: linear-gradient(90deg, #e9eef4 25%, #f7f9fb 37%, #e9eef4 63%);
-  background-size: 400% 100%;
-  animation: skeletonPulse 1.2s ease-in-out infinite;
+  background: #e9eef4;
 }
 .widgetSkeletonCard .skeletonLine {
   width: 62%;
@@ -797,10 +795,6 @@ input, select, textarea { outline: none; }
 .widgetSkeletonCard .skeletonInput {
   width: 100%;
   min-height: 38px;
-}
-@keyframes skeletonPulse {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0 50%; }
 }
 .lowerGrid { display: grid; grid-template-columns: 1fr 1.4fr; gap: 24px; margin-top: 72px; }
 .lowerGrid .portalCard { min-height: 94px; }
@@ -1168,9 +1162,7 @@ input, select, textarea { outline: none; }
 .loadingTable .skeletonAvatar {
   display: block;
   border-radius: 4px;
-  background: linear-gradient(90deg, #e9eef4 25%, #f7f9fb 37%, #e9eef4 63%);
-  background-size: 400% 100%;
-  animation: skeletonPulse 1.2s ease-in-out infinite;
+  background: #e9eef4;
 }
 .loadingTable .skeletonLine {
   width: 100%;

@@ -11,8 +11,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unsupported currency." }, { status: 400 });
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1200);
+
   try {
     const response = await fetch(`https://open.er-api.com/v6/latest/${from}`, {
+      signal: controller.signal,
       next: { revalidate: 3600 },
     });
     if (!response.ok) {
@@ -31,6 +35,8 @@ export async function GET(request: Request) {
     );
   } catch {
     return NextResponse.json({ error: "Currency rate could not be loaded." }, { status: 502 });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
