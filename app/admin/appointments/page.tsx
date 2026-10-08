@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
+import { AppointmentClientConflictError, resolveAppointmentClient } from "@/lib/appointmentClient";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 import { deleteAppointmentIncome, syncAppointmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 type AppointmentSearchParams = {
   delete?: string;
+  error?: string;
   edit?: string;
   q?: string;
   new?: string;
@@ -86,47 +88,58 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
     const db = getDb();
     const now = new Date();
-    const client = await db.query(
-      `
-        INSERT INTO "clients" (
-          ref_id, firstname, lastname, email, epassword, phone, phone2, cnic, cnic_issue,
-          cnic_expiry, gender, avatar, city, province, country, address, destination_country,
-          visa_category, passport_no, passport_issue, passport_expiry, documents, created_at, updated_at
-        )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$23)
-        RETURNING id
-      `,
-      [
-        nullableText(formData, "ref_id"),
-        text(formData, "firstname"),
-        text(formData, "lastname"),
-        nullableText(formData, "email"),
-        nullableText(formData, "epassword"),
-        text(formData, "phone"),
-        nullableText(formData, "phone2"),
-        nullableText(formData, "cnic"),
-        nullableText(formData, "cnic_issue"),
-        nullableText(formData, "cnic_expiry"),
-        text(formData, "gender", "Male"),
-        text(formData, "avatar", "user.jpg"),
-        nullableText(formData, "city"),
-        nullableText(formData, "province"),
-        nullableText(formData, "country"),
-        text(formData, "address", "Not provided"),
-        nullableText(formData, "destination_country"),
-        nullableText(formData, "visa_category"),
-        nullableText(formData, "passport_no"),
-        nullableText(formData, "passport_issue"),
-        nullableText(formData, "passport_expiry"),
-        nullableText(formData, "documents"),
-        now,
-      ],
-    );
+    const email = nullableText(formData, "email")?.toLowerCase() || null;
+    const cnic = nullableText(formData, "cnic");
+    let clientId: number;
+    try {
+      clientId = await resolveAppointmentClient(db, { email, cnic }, () => db.query(
+        `
+          INSERT INTO "clients" (
+            ref_id, firstname, lastname, email, epassword, phone, phone2, cnic, cnic_issue,
+            cnic_expiry, gender, avatar, city, province, country, address, destination_country,
+            visa_category, passport_no, passport_issue, passport_expiry, documents, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$23)
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `,
+        [
+          nullableText(formData, "ref_id"),
+          text(formData, "firstname"),
+          text(formData, "lastname"),
+          email,
+          nullableText(formData, "epassword"),
+          text(formData, "phone"),
+          nullableText(formData, "phone2"),
+          cnic,
+          nullableText(formData, "cnic_issue"),
+          nullableText(formData, "cnic_expiry"),
+          text(formData, "gender", "Male"),
+          text(formData, "avatar", "user.jpg"),
+          nullableText(formData, "city"),
+          nullableText(formData, "province"),
+          nullableText(formData, "country"),
+          text(formData, "address", "Not provided"),
+          nullableText(formData, "destination_country"),
+          nullableText(formData, "visa_category"),
+          nullableText(formData, "passport_no"),
+          nullableText(formData, "passport_issue"),
+          nullableText(formData, "passport_expiry"),
+          nullableText(formData, "documents"),
+          now,
+        ],
+      ));
+    } catch (error) {
+      if (error instanceof AppointmentClientConflictError) {
+        redirect("/admin/appointments?new=appointment&error=client_identity");
+      }
+      throw error;
+    }
 
     const created = await db.query(
       `INSERT INTO "appointments" (client_id, fee, appointmentstatus, category, appointmentdate, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6) RETURNING id`,
       [
-        Number(client.rows[0].id),
+        clientId,
         currentCanEditAppointmentPayments ? numberValue(formData, "fee") : 0,
         currentCanEditAppointmentPayments ? text(formData, "appointmentstatus", "Unpaid") : "Unpaid",
         text(formData, "category", "visit"),
@@ -141,7 +154,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       resource: "appointments",
       resourceTitle: "Appointment",
       subjectId: created.rows[0]?.id,
-      properties: { client_id: Number(client.rows[0].id) },
+      properties: { client_id: clientId },
     });
 
     redirect("/admin/appointments");
@@ -307,7 +320,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       {canCreate ? <Link className="btn btnPrimary" href={appointmentListHref({ q: query, page: currentPage, pageSize, new: "appointment" })}>New Client &amp; Appointment</Link> : null}
     </div>
 
-    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} /> : null}
+    {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} clientIdentityError={params.error === "client_identity"} /> : null}
     {canEdit && editAppointment ? <AppointmentEditModal action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} /> : null}
     {canDelete && deleteTarget ? <DeleteAppointmentModal action={deleteAppointment} appointment={deleteTarget} closeHref={listHref} /> : null}
     {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} closeHref={listHref} /> : null}
@@ -469,11 +482,13 @@ async function getAppointmentCaseSeed(appointmentId: number) {
 function AppointmentModal({
   action,
   canEditAppointmentPayments,
+  clientIdentityError,
   closeHref,
   defaultDateTime,
 }: {
   action: (formData: FormData) => Promise<void>;
   canEditAppointmentPayments: boolean;
+  clientIdentityError: boolean;
   closeHref: string;
   defaultDateTime: string;
 }) {
@@ -482,6 +497,8 @@ function AppointmentModal({
       <Link className="modalClose" href={closeHref} aria-label="Close">x</Link>
       <h2>New Appointment</h2>
       <div className="modalDivider" />
+      {clientIdentityError ? <div className="notice errorNotice" role="alert">These details do not identify a single client. Check the saved email and CNIC in <Link href="/admin/clients">Clients</Link>, then enter the correct details below.</div> : null}
+      <p className="muted">If the email or CNIC matches an existing client, the appointment will use that client and keep their saved details.</p>
       <div className="modalGrid">
         <Field name="firstname" label="First Name" required />
         <Field name="lastname" label="Last Name" required />
