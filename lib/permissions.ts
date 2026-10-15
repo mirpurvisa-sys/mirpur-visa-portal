@@ -51,6 +51,13 @@ export function canManageCaseFinance(user: CurrentUser) {
   return canViewResource(user, "cases") && canViewFinance(user);
 }
 
+// Accountants also act as case officers, but only for cases assigned to their login.
+export function canWorkOnCase(user: CurrentUser, assignedUserId: unknown) {
+  const resource = resources.find((item) => item.key === "cases");
+  return Boolean(resource && canEditResource(user, resource)) ||
+    (isAccountant(user) && Number(assignedUserId) === user.id);
+}
+
 export function canManageAppointmentPayments(user: CurrentUser) {
   return canViewFinance(user) || user.roleSlugs.includes("receptionist");
 }

@@ -6,7 +6,7 @@ import { completeCase } from "@/app/admin/cases/actions";
 import { notFound, redirect } from "next/navigation";
 import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
@@ -152,7 +152,7 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
                   <div className="actionStack vertical">
                     {Number(employee.user_id) === user.id && !isCaseCompleted(caseRow.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={caseRow.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
                     <Link className="actionBtn view" href={`/admin/cases/${caseRow.id}`} aria-label={`View case for ${clientName}`}><Eye size={18} /></Link>
-                    {canEditCases ? <Link className="actionBtn edit" href={`/admin/cases/${caseRow.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18} /></Link> : null}
+                    {canEditCases || (isAccountant(user) && Number(employee.user_id) === user.id) ? <Link className="actionBtn edit" href={`/admin/cases/${caseRow.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18} /></Link> : null}
                     {canDeleteCases ? <form action={deleteCase}><input type="hidden" name="id" value={caseRow.id} /><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18} /></button></form> : null}
                   </div>
                 </td>

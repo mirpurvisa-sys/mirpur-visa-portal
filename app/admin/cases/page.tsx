@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 const CASE_PAGE_SIZES = [25, 50, 100];
 
-export default async function CasesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; pageSize?: string; status?: string }> }) {
+export default async function CasesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; pageSize?: string; status?: string; assigned?: string }> }) {
   const user = await requireUser();
   if (!canViewResource(user, "cases")) return <AccessDenied />;
 
@@ -31,6 +31,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   const pageSize = parsePageSize(params.pageSize);
   const currentPage = parsePositiveInt(params.page, 1);
   const status = ["ongoing", "completed"].includes(params.status || "") ? params.status! : "all";
+  const assigned = params.assigned === "me" ? "me" : "all";
 
   async function deleteCase(formData: FormData) {
     "use server";
@@ -55,7 +56,12 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
 
   const { condition, values } = buildClientSearch(q, "c", 1, ["cc.id::text", "cc.client_name", 'cc."caseCategory"', "cc.status"]);
   const statusCondition = status === "all" ? "" : `lower(btrim(COALESCE(cc.status,''))) ${status === "completed" ? "IN" : "NOT IN"} ('completed','closed')`;
-  const filters = [condition, statusCondition].filter(Boolean);
+  let assignmentCondition = "";
+  if (assigned === "me") {
+    values.push(String(user.id));
+    assignmentCondition = `EXISTS (SELECT 1 FROM employees own WHERE own.id=cc.employee_id AND own.user_id=$${values.length})`;
+  }
+  const filters = [condition, statusCondition, assignmentCondition].filter(Boolean);
   const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   const searchOrder = clientSearchOrderSql(q);
   const db = getDb();
@@ -65,7 +71,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   );
   const total = Number(countResult.rows[0]?.total || 0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  if (currentPage > totalPages) redirect(caseListHref({ q, status, page: totalPages, pageSize }));
+  if (currentPage > totalPages) redirect(caseListHref({ q, status, assigned, page: totalPages, pageSize }));
   const offset = (currentPage - 1) * pageSize;
   const limitIndex = values.length + 1;
   const offsetIndex = values.length + 2;
@@ -106,6 +112,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
       <form className="legacySearch" action="/admin/cases" style={{ gap: 8, flexWrap: "wrap" }}>
         <input type="hidden" name="pageSize" value={pageSize} />
         <label>Cases:<select className="input smallSelect" name="status" defaultValue={status}><option value="all">All cases</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option></select></label>
+        <label>Assigned:<select className="input" name="assigned" defaultValue={assigned}><option value="all">All cases</option><option value="me">My assigned cases</option></select></label>
         <label htmlFor="case-search">Search:<input id="case-search" className="input" name="q" defaultValue={q} placeholder="Name, ID, CNIC or phone" aria-describedby="case-search-help" /></label>
         <button className="btn" type="submit">Search</button>
       </form>
@@ -114,6 +121,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         <p className="muted">Showing {result.rows.length ? offset + 1 : 0}-{result.rows.length ? offset + result.rows.length : 0} of {total} cases</p>
         <form className="pageSizeForm" action="/admin/cases">
           <input type="hidden" name="status" value={status} />
+          <input type="hidden" name="assigned" value={assigned} />
           {q ? <input type="hidden" name="q" value={q} /> : null}
           <label>Rows:
             <select className="input smallSelect" name="pageSize" defaultValue={pageSize}>
@@ -151,7 +159,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
             <td className="actionColumn"><div className="actionStack vertical">
               {row.is_assigned && !isCaseCompleted(row.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={row.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
               <Link className="actionBtn view" href={`/admin/cases/${row.id}`} aria-label={`View case for ${clientName}`}><Eye size={18}/></Link>
-              {canEdit ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
+              {canEdit || (isAccountant(user) && row.is_assigned) ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
               {canDelete ? <form action={deleteCase}><input type="hidden" name="id" value={row.id}/><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18}/></button></form> : null}
             </div></td>
           </tr>;
@@ -159,9 +167,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
       </table>
       {result.rows.length === 0 ? <div className="emptyState">No data available in table</div> : null}
       <nav className="paginationBar" aria-label="Cases pages">
-        {currentPage > 1 ? <Link className="btn" href={caseListHref({ q, status, page: currentPage - 1, pageSize })}>Previous</Link> : <span className="btn disabledBtn">Previous</span>}
+        {currentPage > 1 ? <Link className="btn" href={caseListHref({ q, status, assigned, page: currentPage - 1, pageSize })}>Previous</Link> : <span className="btn disabledBtn">Previous</span>}
         <span>Page {currentPage} of {totalPages}</span>
-        {currentPage < totalPages ? <Link className="btn" href={caseListHref({ q, status, page: currentPage + 1, pageSize })}>Next</Link> : <span className="btn disabledBtn">Next</span>}
+        {currentPage < totalPages ? <Link className="btn" href={caseListHref({ q, status, assigned, page: currentPage + 1, pageSize })}>Next</Link> : <span className="btn disabledBtn">Next</span>}
       </nav>
     </section>
   </>;
@@ -171,10 +179,11 @@ function AccessDenied() {
   return <div className="panel"><h1>Cases</h1><p className="muted">You do not have permission to access case operations.</p></div>;
 }
 
-function caseListHref(params: { q: string; page: number; pageSize: number; status?: string }) {
+function caseListHref(params: { q: string; page: number; pageSize: number; status?: string; assigned?: string }) {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
   if (params.status && params.status !== "all") search.set("status", params.status);
+  if (params.assigned === "me") search.set("assigned", "me");
   if (params.page > 1) search.set("page", String(params.page));
   if (params.pageSize !== CASE_PAGE_SIZES[0]) search.set("pageSize", String(params.pageSize));
   const queryString = search.toString();

@@ -8,7 +8,7 @@ import { notFound, redirect } from "next/navigation";
 import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource, canWorkOnCase } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
@@ -27,7 +27,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   const user = await requireUser();
   const resource = getResource("cases");
   if (!canViewResource(user, "cases")) return <AccessDenied />;
-  const canEdit = resource ? canEditResource(user, resource) : false;
+  let canEdit = resource ? canEditResource(user, resource) : false;
   const canDelete = resource ? canDeleteResource(user, resource) : false;
   const showFinance = canViewFinance(user);
   const canEditFinance = canManageCaseFinance(user);
@@ -42,14 +42,25 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   ]);
   if (!caseRow) notFound();
   const assignedUser = await getDb().query(`SELECT user_id FROM employees WHERE id=$1`, [caseRow.employee_id]);
+  canEdit = canWorkOnCase(user, assignedUser.rows[0]?.user_id);
   const canComplete = Number(assignedUser.rows[0]?.user_id) === user.id && !isCaseCompleted(caseRow.status);
   const documentReturnPath = `/admin/cases/${caseId}${sp.mode === "edit" ? "?mode=edit" : ""}#attachments`;
+
+  async function requireCaseWork(currentUser: Awaited<ReturnType<typeof requireUser>>) {
+    const assigned = await getDb().query(`
+      SELECT cc.client_id, cc.employee_id, e.user_id FROM client_cases cc
+      LEFT JOIN employees e ON e.id=cc.employee_id WHERE cc.id=$1
+    `, [caseId]);
+    const row = assigned.rows[0];
+    if (!row || !canWorkOnCase(currentUser, row.user_id)) throw new Error("You can only work on cases assigned to you.");
+    return row;
+  }
 
   async function updateClient(formData: FormData) {
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to edit this client.");
+    const currentCase = await requireCaseWork(currentUser);
 
     await getDb().query(
       `
@@ -78,7 +89,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
         nullableText(formData, "passport_issue"),
         nullableText(formData, "passport_expiry"),
         nullableText(formData, "documents"),
-        Number(formData.get("client_id")),
+        Number(currentCase.client_id),
       ],
     );
 
@@ -117,7 +128,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to edit this case.");
+    const currentCase = await requireCaseWork(currentUser);
     const currentCanViewFinance = canViewFinance(currentUser);
     const db = getDb();
     const existing = await db.query(
@@ -148,7 +159,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
         WHERE id=$22
       `,
       [
-        numberValue(formData, "employee_id"),
+        currentResource && canEditResource(currentUser, currentResource) ? numberValue(formData, "employee_id") : Number(currentCase.employee_id),
         text(formData, "client_name"),
         totalValue,
         advanceValue,
@@ -263,7 +274,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to upload case documents.");
+    await requireCaseWork(currentUser);
 
     const uploadedFiles = formData.getAll("documents").filter(isUploadedFile);
     if (!uploadedFiles.length) throw new Error("Please choose at least one document to upload.");
@@ -295,7 +306,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to delete case documents.");
+    await requireCaseWork(currentUser);
 
     const documentId = Number(formData.get("document_id"));
     if (!Number.isFinite(documentId)) throw new Error("Invalid document.");
@@ -431,7 +442,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <Field formId={formId} name="endDate" label="End Date" type="date" defaultValue={dateInput(caseRow.endDate)} />
           <Field formId={formId} name="submitted_on" label="Submitted on" type="date" defaultValue={dateInput(caseRow.submitted_on)} />
           <Field formId={formId} name="travel_dates" label="Travel Dates" defaultValue={caseRow.travel_dates} />
-          <EmployeeSelect formId={formId} employees={employees} value={caseRow.employee_id} />
+          <EmployeeSelect formId={formId} employees={employees} value={caseRow.employee_id} disabled={!resource || !canEditResource(user, resource)} />
           <Field formId={formId} name="description" label="Description" defaultValue={caseRow.description} wide />
           <Select formId={formId} name="appointment_category" label="Appointment Type" value={caseRow.appointment_category || "visit"} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
           {showFinance ? <Select formId={formId} name="appointmentstatus" label="Appointment Payment" value={caseRow.appointmentstatus || "Unpaid"} options={["Paid", "Unpaid"]} /> : null}
