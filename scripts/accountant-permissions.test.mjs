@@ -67,6 +67,17 @@ test("dedicated payment operations are enabled without case editing", () => {
   assert.equal(permissions.canEditResource(accountant, resource("cases")), false);
   assert.equal(permissions.canSearch(accountant), true);
 });
+test("accountants can work on their own assigned case without general case-edit permission", () => {
+  assert.equal(permissions.canWorkOnCase(accountant, 7), true);
+  assert.equal(permissions.canWorkOnCase(accountant, "7"), true);
+  assert.equal(permissions.canWorkOnCase(accountant, 8), false);
+  assert.equal(permissions.canWorkOnCase(accountant, null), false);
+  assert.equal(permissions.canWorkOnCase(accountant, undefined), false);
+  assert.equal(permissions.canWorkOnCase(user("", { userType: "Accountant", roleSlugs: [] }), 7), true);
+  assert.equal(permissions.canWorkOnCase(user("teacher"), 7), false);
+  assert.equal(permissions.canWorkOnCase(user("case_officer"), 8), true);
+  assert.equal(permissions.canWorkOnCase(user("admin"), 8), true);
+});
 test("financial fields and entered values remain available to accountant forms", () => {
   const res = resource("case-installments");
   assert.equal(permissions.visibleResourceForUser(accountant, res), res);
@@ -222,4 +233,48 @@ test("removing an installment removes its synchronized income and recalculates t
   await assert.rejects(action(), error => error.location === "/admin/case-installments");
   assert.ok(context.calls.some(call => call[0] === "remove-income" && call[1] === 88));
   assert.ok(context.calls.some(call => call[0] === "totals" && call[1] === 91));
+});
+
+function assignedContext(assignedUserId) {
+  const context = actionContext();
+  context.globals.canWorkOnCase = permissions.canWorkOnCase;
+  context.globals.nullableText = (form, key) => form.get(key) || null;
+  context.globals.getDb = () => ({ async query(sql, values) {
+    context.queries.push({ sql, values });
+    if (sql.includes("SELECT cc.client_id")) return { rows: [{ client_id: 25, employee_id: 100, user_id: assignedUserId }] };
+    return { rows: [] };
+  } });
+  context.globals.requireCaseWork = serverFunction("../app/admin/cases/[id]/page.tsx", "requireCaseWork", context.globals);
+  return context;
+}
+for (const name of ["updateClient", "updateCase", "uploadDocuments", "deleteDocument"]) {
+  test(`accountant ${name} action refuses a case currently assigned to someone else`, async () => {
+    const context = assignedContext(8);
+    const action = serverFunction("../app/admin/cases/[id]/page.tsx", name, context.globals);
+    await assert.rejects(action(new FormData()), /assigned to you/);
+    assert.equal(context.queries.length, 1);
+    assert.ok(!/UPDATE|INSERT|DELETE/.test(context.queries[0].sql));
+  });
+}
+test("editing a client from an assigned case ignores a forged client ID", async () => {
+  const context = assignedContext(7);
+  const action = serverFunction("../app/admin/cases/[id]/page.tsx", "updateClient", context.globals);
+  const form = new FormData(); form.set("client_id", "999"); form.set("firstname", "Example");
+  await assert.rejects(action(form), error => error.location === "/admin/cases/91");
+  assert.equal(context.queries.length, 2);
+  assert.equal(context.queries[1].values.at(-1), 25);
+});
+test("an accountant cannot reassign their case through a forged update form", async () => {
+  const context = assignedContext(7);
+  Object.assign(context.globals, {
+    dateValue: () => "2026-10-15", dateTimeValue: () => "2026-10-15 10:00",
+    canViewFinance: permissions.canViewFinance,
+    checkboxValue: () => 0, textFromValue: (value, fallback) => value || fallback,
+  });
+  const action = serverFunction("../app/admin/cases/[id]/page.tsx", "updateCase", context.globals);
+  const form = new FormData(); form.set("employee_id", "999");
+  await assert.rejects(action(form), error => error.location === "/admin/cases/91");
+  const update = context.queries.find(query => query.sql.includes('UPDATE "client_cases"'));
+  assert.ok(update);
+  assert.equal(update.values[0], 100);
 });
