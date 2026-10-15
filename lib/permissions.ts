@@ -3,21 +3,21 @@ import { resources, type Resource } from "./adminConfig";
 
 const ROLE_RESOURCES: Record<string, string[]> = {
   admin: resources.map((resource) => resource.key),
-  accountant: ["cases", "clients"],
+  accountant: ["cases", "clients", "appointments", "incomes", "expenses", "case-installments", "employees", "ielts", "life-skills"],
   case_officer: ["clients", "cases", "appointments", "documents", "families", "reminders"],
   receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
 };
 
 const ROLE_CREATE_RESOURCES: Record<string, string[]> = {
-  accountant: [],
+  accountant: ["incomes", "expenses", "case-installments"],
   case_officer: ["cases", "documents", "families", "reminders"],
   receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
 };
 
 const ROLE_EDIT_RESOURCES: Record<string, string[]> = {
-  accountant: [],
+  accountant: ["incomes", "expenses", "case-installments"],
   case_officer: ["cases", "documents", "families", "reminders"],
   receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
@@ -40,7 +40,15 @@ export function isAdmin(user: CurrentUser) {
 }
 
 export function canViewFinance(user: CurrentUser) {
-  return isAdmin(user);
+  return isAdmin(user) || isAccountant(user);
+}
+
+export function isAccountant(user: CurrentUser) {
+  return user.roleSlugs.some((role) => role.trim().toLowerCase() === "accountant") || user.userType?.trim().toLowerCase() === "accountant";
+}
+
+export function canManageCaseFinance(user: CurrentUser) {
+  return canViewResource(user, "cases") && canViewFinance(user);
 }
 
 export function canManageAppointmentPayments(user: CurrentUser) {
@@ -86,6 +94,7 @@ export function allowedResources(user: CurrentUser) {
 
 export function canViewResource(user: CurrentUser, resourceKey: string) {
   if (isAdmin(user)) return true;
+  if (isAccountant(user) && ROLE_RESOURCES.accountant.includes(resourceKey)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resourceKey)) return false;
   return user.roleSlugs.some((role) => ROLE_RESOURCES[role]?.includes(resourceKey));
 }
@@ -96,11 +105,12 @@ export function requireResourceAccess(user: CurrentUser, resource: Resource) {
 }
 
 export function canSearch(user: CurrentUser) {
-  return isAdmin(user) || user.permissionSlugs.includes("global-search");
+  return isAdmin(user) || isAccountant(user) || user.permissionSlugs.includes("global-search");
 }
 
 export function canCreateResource(user: CurrentUser, resource: Resource) {
   if (isAdmin(user)) return true;
+  if (isAccountant(user) && ROLE_CREATE_RESOURCES.accountant.includes(resource.key)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;
 
@@ -111,6 +121,7 @@ export function canCreateResource(user: CurrentUser, resource: Resource) {
 
 export function canEditResource(user: CurrentUser, resource: Resource) {
   if (isAdmin(user)) return true;
+  if (isAccountant(user) && ROLE_EDIT_RESOURCES.accountant.includes(resource.key)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;
 
@@ -122,6 +133,7 @@ export function canEditResource(user: CurrentUser, resource: Resource) {
 
 export function canDeleteResource(user: CurrentUser, resource: Resource) {
   if (isAdmin(user)) return true;
+  if (isAccountant(user) && FINANCE_RESOURCE_KEYS.has(resource.key)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;
   if (resource.key === "clients") return user.permissionSlugs.includes("delete-client");

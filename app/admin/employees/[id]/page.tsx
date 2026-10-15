@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
+import { isCaseCompleted } from "@/lib/caseStatus";
+import { completeCase } from "@/app/admin/cases/actions";
+
 import { notFound, redirect } from "next/navigation";
 import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
@@ -132,9 +136,9 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
           <tbody>
             {assignedCases.map((caseRow) => {
               const clientName = caseRow.client_name || `${caseRow.firstname || ""} ${caseRow.lastname || ""}`.trim() || "-";
-              return <tr key={caseRow.id}>
+              return <tr key={caseRow.id} className={isCaseCompleted(caseRow.status) ? "caseCompletedRow" : undefined}>
                 <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
-                <td>{clientName}</td>
+                <td>{clientName}<br /><CaseStatusBadge status={caseRow.status} /></td>
                 <td>{caseRow.phone || "-"}</td>
                 {showFinance ? <>
                   <td>{plainMoney(caseRow.total)}</td>
@@ -146,6 +150,7 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
                 <td>{formatDate(caseRow.endDate)}</td>
                 <td className="actionColumn">
                   <div className="actionStack vertical">
+                    {Number(employee.user_id) === user.id && !isCaseCompleted(caseRow.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={caseRow.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
                     <Link className="actionBtn view" href={`/admin/cases/${caseRow.id}`} aria-label={`View case for ${clientName}`}><Eye size={18} /></Link>
                     {canEditCases ? <Link className="actionBtn edit" href={`/admin/cases/${caseRow.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18} /></Link> : null}
                     {canDeleteCases ? <form action={deleteCase}><input type="hidden" name="id" value={caseRow.id} /><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18} /></button></form> : null}

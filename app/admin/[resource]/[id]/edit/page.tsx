@@ -8,6 +8,8 @@ import { requireUser } from "@/lib/auth";
 import { changedFields, recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 import { revalidateFinanceCache } from "@/lib/finance";
+import { syncCaseTotals } from "@/lib/erp";
+import { deleteCaseInstallmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +33,13 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     if(!canEditResource(currentUser, res)) throw new Error("You do not have permission to edit this record.");
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "edit"), "edit"); delete data.created_at;
+    const previous = res.key === "case-installments" ? await delegate(res.model).findUnique({ where: parseRecordWhere(res, id) }) : null;
     const updated = await delegate(res.model).update({ where: parseRecordWhere(res, id), data });
+    if (res.key === "case-installments" && updated) {
+      await syncCaseInstallmentIncome(Number(updated.id));
+      await syncCaseTotals(Number(updated.client_case_id));
+      if (previous && Number(previous.client_case_id) !== Number(updated.client_case_id)) await syncCaseTotals(Number(previous.client_case_id));
+    }
     if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,
@@ -49,6 +57,10 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const currentUser = await requireUser();
     if(!canDeleteResource(currentUser, res)) throw new Error("You do not have permission to delete this record.");
     const deleted = await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
+    if (res.key === "case-installments" && deleted) {
+      await deleteCaseInstallmentIncome(Number(deleted.id));
+      await syncCaseTotals(Number(deleted.client_case_id));
+    }
     if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,

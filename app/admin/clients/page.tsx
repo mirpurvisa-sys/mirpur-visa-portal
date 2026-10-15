@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
+import { isCaseCompleted } from "@/lib/caseStatus";
 import { redirect } from "next/navigation";
 import { ListPlus, Pencil, Plus, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
+import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, localDateTime, nullableText, numberValue, text } from "@/lib/erp";
 import { syncAppointmentIncome } from "@/lib/incomeSync";
@@ -13,6 +16,8 @@ export const dynamic = "force-dynamic";
 
 type ClientSearchParams = {
   q?: string;
+  page?: string;
+  pageSize?: string;
   new?: string;
   appointment_for?: string;
   view_client?: string;
@@ -20,6 +25,7 @@ type ClientSearchParams = {
 };
 
 type DbRow = Record<string, any>;
+const CLIENT_PAGE_SIZES = [25, 50, 100];
 
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<ClientSearchParams> }) {
   const user = await requireUser();
@@ -34,15 +40,21 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
   const canEditAppointmentPayments = canManageAppointmentPayments(user);
   const params = await searchParams;
   const query = textFromValue(params.q, "");
+  const pageSize = parsePageSize(params.pageSize);
+  const currentPage = parsePositiveInt(params.page, 1);
+  const listHref = clientListHref({ q: query, page: currentPage, pageSize });
   const appointmentClientId = Number(params.appointment_for || 0);
   const viewClientId = Number(params.view_client || 0);
   const defaultDateTime = localDateTime();
 
   const [clients, appointmentClient, viewedClient] = await Promise.all([
-    getClients(query),
+    getClients(query, currentPage, pageSize),
     appointmentClientId > 0 ? getClient(appointmentClientId) : Promise.resolve(null),
     viewClientId > 0 ? getClient(viewClientId) : Promise.resolve(null),
   ]);
+  if (clients.page !== currentPage) {
+    redirect(clientListHref({ q: query, page: clients.page, pageSize }));
+  }
 
   async function createClient(formData: FormData) {
     "use server";
@@ -146,18 +158,33 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
     </div>
 
     <div className="appointmentTopActions">
-      {canCreate ? <Link className="btn btnPrimary" href="/admin/clients?new=client">Add New Client</Link> : null}
+      {canCreate ? <Link className="btn btnPrimary" href={clientListHref({ q: query, page: currentPage, pageSize, new: "client" })}>Add New Client</Link> : null}
     </div>
 
     {params.error === "linked" ? <div className="notice errorNotice">This client already has appointments or cases, so it was not deleted.</div> : null}
-    {canCreate && params.new === "client" ? <ClientModal action={createClient} /> : null}
-    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} /> : null}
-    {viewedClient ? <ClientViewModal client={viewedClient} /> : null}
+    {canCreate && params.new === "client" ? <ClientModal action={createClient} closeHref={listHref} /> : null}
+    {canAddAppointment && appointmentClient ? <AppointmentForClientModal action={createAppointmentForClient} client={appointmentClient} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} /> : null}
+    {viewedClient ? <ClientViewModal client={viewedClient} closeHref={listHref} /> : null}
 
     <section className="panel tableWrap clientPanel">
-      <form className="legacySearch">
-        <label>Search:<input className="input" name="q" defaultValue={query} /></label>
+      <form className="legacySearch" action="/admin/clients" style={{ gap: 8, flexWrap: "wrap" }}>
+        <input type="hidden" name="pageSize" value={pageSize} />
+        <label htmlFor="client-search">Search:<input id="client-search" className="input" name="q" defaultValue={query} placeholder="Name, ID, CNIC or phone" aria-describedby="client-search-help" /></label>
+        <button className="btn" type="submit">Search</button>
       </form>
+      <p id="client-search-help" className="muted">Search by name, client ID, reference, CNIC, either phone, email, city, address, passport, or visa details.</p>
+      <div className="tableControlBar">
+        <p className="muted">Showing {clients.start}-{clients.end} of {clients.total} clients</p>
+        <form className="pageSizeForm" action="/admin/clients">
+          {query ? <input type="hidden" name="q" value={query} /> : null}
+          <label>Rows:
+            <select className="input smallSelect" name="pageSize" defaultValue={pageSize}>
+              {CLIENT_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <button className="btn" type="submit">Apply</button>
+        </form>
+      </div>
       <table className="table dataTable clientLegacyTable">
         <thead>
           <tr>
@@ -172,53 +199,52 @@ export default async function ClientsPage({ searchParams }: { searchParams: Prom
           </tr>
         </thead>
         <tbody>
-          {clients.length === 0 ? <tr><td colSpan={8} className="emptyState">No data available in table</td></tr> : clients.map((client) => (
-            <tr key={client.id}>
+          {clients.rows.length === 0 ? <tr><td colSpan={8} className="emptyState">No data available in table</td></tr> : clients.rows.map((client) => (
+            <tr key={client.id} className={client.case_id && isCaseCompleted(client.case_status) ? "caseCompletedRow" : undefined}>
               <td>{client.ref_id || fallbackReference(client.id)}</td>
               <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
-              <td>{client.firstname}<br />{client.lastname}</td>
+              <td>{client.firstname}<br />{client.lastname}{client.case_id ? <><br /><Link href={`/admin/cases/${client.case_id}`}><CaseStatusBadge status={client.case_status} /></Link></> : null}<br /><small className="muted">Client ID: {client.id}</small>{client.cnic ? <><br /><small className="muted">CNIC: {client.cnic}</small></> : null}</td>
               <td>{client.phone}</td>
               <td>{client.email || ""}</td>
               <td>{formatAddress(client)}</td>
               <td>
                 <div className="actionStack vertical">
-                  <Link className="actionBtn view" href={`/admin/clients?view_client=${client.id}`} aria-label="View client"><ListPlus size={18} /></Link>
+                  <Link className="actionBtn view" href={clientListHref({ q: query, page: currentPage, pageSize, view_client: client.id })} aria-label="View client"><ListPlus size={18} /></Link>
                   {canEdit ? <Link className="actionBtn edit" href={`/admin/clients/${client.id}/edit`} aria-label="Edit client"><Pencil size={18} /></Link> : null}
                   {canDelete ? <form action={deleteClient}><input type="hidden" name="id" value={client.id} /><button className="actionBtn delete" aria-label="Delete client"><Trash2 size={18} /></button></form> : null}
                 </div>
               </td>
               <td>
-                {client.appointment_id ? <span className="caseStartedText">Already booked</span> : canAddAppointment ? <Link className="actionBtn start" href={`/admin/clients?appointment_for=${client.id}`} aria-label="Add appointment"><Plus size={22} /></Link> : <span className="muted">-</span>}
+                {client.appointment_id ? <span className="caseStartedText">Already booked</span> : canAddAppointment ? <Link className="actionBtn start" href={clientListHref({ q: query, page: currentPage, pageSize, appointment_for: client.id })} aria-label="Add appointment"><Plus size={22} /></Link> : <span className="muted">-</span>}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      <nav className="paginationBar" aria-label="Clients pages">
+        {clients.page > 1 ? <Link className="btn" href={clientListHref({ q: query, page: clients.page - 1, pageSize })}>Previous</Link> : <span className="btn disabledBtn">Previous</span>}
+        <span>Page {clients.page} of {clients.totalPages}</span>
+        {clients.page < clients.totalPages ? <Link className="btn" href={clientListHref({ q: query, page: clients.page + 1, pageSize })}>Next</Link> : <span className="btn disabledBtn">Next</span>}
+      </nav>
     </section>
   </>;
 }
 
-async function getClients(query: string) {
-  const values: unknown[] = [];
-  let where = "";
-  if (query) {
-    values.push(`%${query}%`);
-    where = `
-      WHERE c.ref_id ILIKE $1
-         OR c.firstname ILIKE $1
-         OR c.lastname ILIKE $1
-         OR c.phone ILIKE $1
-         OR COALESCE(c.email, '') ILIKE $1
-         OR COALESCE(c.address, '') ILIKE $1
-         OR COALESCE(c.city, '') ILIKE $1
-         OR COALESCE(c.province, '') ILIKE $1
-         OR COALESCE(c.country, '') ILIKE $1
-    `;
-  }
-
-  const result = await getDb().query(
+async function getClients(query: string, requestedPage: number, pageSize: number) {
+  const { condition, values } = buildClientSearch(query);
+  const where = condition ? `WHERE ${condition}` : "";
+  const searchOrder = clientSearchOrderSql(query);
+  const db = getDb();
+  const countResult = await db.query(`SELECT COUNT(*)::int AS total FROM "clients" c ${where}`, values);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  const limitIndex = values.length + 1;
+  const offsetIndex = values.length + 2;
+  const result = await db.query(
     `
-      SELECT c.*, latest_appointment.id AS appointment_id
+      SELECT c.*, latest_appointment.id AS appointment_id, latest_case.id AS case_id, latest_case.status AS case_status
       FROM "clients" c
       LEFT JOIN LATERAL (
         SELECT a.id
@@ -227,24 +253,29 @@ async function getClients(query: string) {
         ORDER BY a.appointmentdate DESC, a.id DESC
         LIMIT 1
       ) latest_appointment ON TRUE
+      LEFT JOIN LATERAL (SELECT cc.id, cc.status FROM client_cases cc WHERE cc.client_id=c.id ORDER BY cc.id DESC LIMIT 1) latest_case ON TRUE
       ${where}
-      ORDER BY c.id DESC
-      LIMIT 80
+      ORDER BY ${searchOrder ? `${searchOrder}, ` : ""}c.id DESC
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
     `,
-    values,
+    [...values, pageSize, offset],
   );
-  return result.rows as DbRow[];
+  const rows = result.rows as DbRow[];
+  return { rows, page, total, totalPages, start: rows.length ? offset + 1 : 0, end: rows.length ? offset + rows.length : 0 };
 }
 
 async function getClient(clientId: number) {
-  const result = await getDb().query(`SELECT * FROM "clients" WHERE id=$1 LIMIT 1`, [clientId]);
+  const result = await getDb().query(`SELECT c.*,
+    (SELECT id FROM client_cases WHERE client_id=c.id ORDER BY id DESC LIMIT 1) AS case_id,
+    (SELECT status FROM client_cases WHERE client_id=c.id ORDER BY id DESC LIMIT 1) AS case_status
+    FROM "clients" c WHERE c.id=$1 LIMIT 1`, [clientId]);
   return (result.rows[0] as DbRow | undefined) ?? null;
 }
 
-function ClientModal({ action }: { action: (formData: FormData) => Promise<void> }) {
+function ClientModal({ action, closeHref }: { action: (formData: FormData) => Promise<void>; closeHref: string }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal appointmentCreateModal">
-      <Link className="modalClose" href="/admin/clients" aria-label="Close">&times;</Link>
+      <Link className="modalClose" href={closeHref} aria-label="Close">&times;</Link>
       <h2>New Client</h2>
       <div className="modalDivider" />
       <ClientFields />
@@ -258,15 +289,17 @@ function AppointmentForClientModal({
   client,
   canEditAppointmentPayments,
   defaultDateTime,
+  closeHref,
 }: {
   action: (formData: FormData) => Promise<void>;
   client: DbRow;
   canEditAppointmentPayments: boolean;
   defaultDateTime: string;
+  closeHref: string;
 }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal caseStartModal">
-      <Link className="modalClose" href="/admin/clients" aria-label="Close">&times;</Link>
+      <Link className="modalClose" href={closeHref} aria-label="Close">&times;</Link>
       <h2>New Appointment</h2>
       <div className="modalDivider" />
       <input type="hidden" name="client_id" value={client.id} />
@@ -285,15 +318,17 @@ function AppointmentForClientModal({
   </div>;
 }
 
-function ClientViewModal({ client }: { client: DbRow }) {
+function ClientViewModal({ client, closeHref }: { client: DbRow; closeHref: string }) {
   return <div className="modalOverlay">
     <div className="mvcModal caseStartModal">
-      <Link className="modalClose" href="/admin/clients" aria-label="Close">&times;</Link>
+      <Link className="modalClose" href={closeHref} aria-label="Close">&times;</Link>
       <h2>Client Detail</h2>
+      {client.case_id ? <Link href={`/admin/cases/${client.case_id}`}><CaseStatusBadge status={client.case_status} /></Link> : null}
       <div className="modalDivider" />
       <div className="clientDetailModal">
         <img className="profilePhoto" src="/avatar.svg" alt="" />
         <div className="detailGrid">
+          <span>Client ID</span><strong>{client.id}</strong>
           <span>Reference ID</span><strong>{client.ref_id || fallbackReference(client.id)}</strong>
           <span>Name</span><strong>{client.firstname} {client.lastname}</strong>
           <span>Phone</span><strong>{client.phone}</strong>
@@ -428,6 +463,35 @@ function formatAddress(client: Record<string, unknown>) {
 
 function fallbackReference(id: unknown) {
   return `${id}/MVC/2026`;
+}
+
+function clientListHref(params: {
+  q: string;
+  page: number;
+  pageSize: number;
+  new?: string;
+  appointment_for?: number | string;
+  view_client?: number | string;
+}) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.page > 1) search.set("page", String(params.page));
+  if (params.pageSize !== CLIENT_PAGE_SIZES[0]) search.set("pageSize", String(params.pageSize));
+  if (params.new) search.set("new", params.new);
+  if (params.appointment_for) search.set("appointment_for", String(params.appointment_for));
+  if (params.view_client) search.set("view_client", String(params.view_client));
+  const queryString = search.toString();
+  return queryString ? `/admin/clients?${queryString}` : "/admin/clients";
+}
+
+function parsePageSize(value: unknown) {
+  const parsed = Number(value);
+  return CLIENT_PAGE_SIZES.includes(parsed) ? parsed : CLIENT_PAGE_SIZES[0];
+}
+
+function parsePositiveInt(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function inputValue(value: unknown) {

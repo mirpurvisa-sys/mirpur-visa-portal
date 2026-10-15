@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
+import { isCaseCompleted } from "@/lib/caseStatus";
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
+import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
 import { AppointmentClientConflictError, resolveAppointmentClient } from "@/lib/appointmentClient";
 import { canCreateResource, canDeleteResource, canEditResource, canManageAppointmentPayments, canViewFinance, canViewResource } from "@/lib/permissions";
 import { dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
@@ -26,6 +29,9 @@ type AppointmentSearchParams = {
 type AppointmentRow = {
   id: number;
   caseId: number | null;
+  caseStatus: string;
+  clientId: number;
+  cnic: string;
   category: string;
   categoryLabel: string;
   dateTimeInput: string;
@@ -49,7 +55,8 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
   if (!resource || !canViewResource(user, "appointments")) return <AccessDenied />;
 
   const canCreate = canCreateResource(user, resource);
-  const canEdit = canEditResource(user, resource);
+  const canEditDetails = canEditResource(user, resource);
+  const canEdit = canEditDetails || canManageAppointmentPayments(user);
   const canDelete = canDeleteResource(user, resource);
   const casesResource = getResource("cases");
   const canStartCase = casesResource ? canCreateResource(user, casesResource) : false;
@@ -164,11 +171,22 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("appointments");
-    if (!currentResource || !canEditResource(currentUser, currentResource)) throw new Error("You do not have permission to update appointments.");
+    if (!currentResource || !canViewResource(currentUser, "appointments") || (!canEditResource(currentUser, currentResource) && !canManageAppointmentPayments(currentUser))) throw new Error("You do not have permission to update appointments.");
 
     const db = getDb();
     const appointmentId = numberValue(formData, "id");
     const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
+    if (!canEditResource(currentUser, currentResource)) {
+      const fee = numberValue(formData, "fee");
+      const status = text(formData, "appointmentstatus", "Unpaid");
+      if (fee < 0 || !["Paid", "Unpaid"].includes(status)) throw new Error("Invalid appointment payment.");
+      await db.query(`UPDATE appointments SET fee=$1, appointmentstatus=$2, updated_at=NOW() WHERE id=$3`, [fee, status, appointmentId]);
+      await syncAppointmentIncome(appointmentId);
+      const linkedCases = await db.query(`SELECT id FROM client_cases WHERE appointment_id=$1`, [appointmentId]);
+      for (const linked of linkedCases.rows) await syncCaseTotals(Number(linked.id));
+      recordActivity({ user: currentUser, action: "updated", resource: "appointments", resourceTitle: "Appointment payment", subjectId: appointmentId, properties: { fee, status } });
+      redirect("/admin/appointments");
+    }
     const existing = currentCanEditAppointmentPayments ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
     const existingRow = existing?.rows[0] || {};
 
@@ -321,15 +339,17 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     </div>
 
     {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} clientIdentityError={params.error === "client_identity"} /> : null}
-    {canEdit && editAppointment ? <AppointmentEditModal action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} /> : null}
+    {canEdit && editAppointment ? <AppointmentEditModal canEditDetails={canEditDetails} action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} /> : null}
     {canDelete && deleteTarget ? <DeleteAppointmentModal action={deleteAppointment} appointment={deleteTarget} closeHref={listHref} /> : null}
     {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} closeHref={listHref} /> : null}
 
     <section className="panel tableWrap appointmentPanel">
-      <form className="legacySearch">
+      <form className="legacySearch" action="/admin/appointments" style={{ gap: 8, flexWrap: "wrap" }}>
         <input type="hidden" name="pageSize" value={pageSize} />
-        <label>Search:<input className="input" name="q" defaultValue={query} /></label>
+        <label htmlFor="appointment-search">Search:<input id="appointment-search" className="input" name="q" defaultValue={query} placeholder="Name, ID, CNIC or phone" aria-describedby="appointment-search-help" /></label>
+        <button className="btn" type="submit">Search</button>
       </form>
+      <p id="appointment-search-help" className="muted">Search by client name, ID, reference, CNIC, phone, email, city, address, passport, visa details, or appointment ID, category and status.</p>
       <div className="tableControlBar">
         <p className="muted">Showing {appointments.rows.length ? appointments.start : 0}-{appointments.end} of {appointments.total} appointments</p>
         <form className="pageSizeForm">
@@ -359,10 +379,10 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
         </thead>
         <tbody>
           {appointments.rows.length === 0 ? <tr><td colSpan={canEditAppointmentPayments ? 10 : 8} className="emptyState">No data available in table</td></tr> : appointments.rows.map((item) => (
-            <tr key={item.id}>
+            <tr key={item.id} className={item.caseId && isCaseCompleted(item.caseStatus) ? "caseCompletedRow" : undefined}>
               <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
               <td>{item.id}</td>
-              <td>{item.firstname} {item.lastname}</td>
+              <td>{item.firstname} {item.lastname}<br /><small className="muted">Client ID: {item.clientId}</small>{item.cnic ? <><br /><small className="muted">CNIC: {item.cnic}</small></> : null}</td>
               <td>{item.phone}</td>
               <td>{item.displayDate}</td>
               {canEditAppointmentPayments ? <td>{item.feeDisplay}</td> : null}
@@ -378,7 +398,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
                 </div>
               </td>
               <td>
-                {!item.caseId && canStartCase ? <Link className="actionBtn start" href={appointmentListHref({ q: query, page: currentPage, pageSize, start_case: item.id })} aria-label="Start case"><Plus size={22} /></Link> : <span className="caseStartedText">Case already started</span>}
+                {!item.caseId && canStartCase ? <Link className="actionBtn start" href={appointmentListHref({ q: query, page: currentPage, pageSize, start_case: item.id })} aria-label="Start case"><Plus size={22} /></Link> : item.caseId ? <Link href={`/admin/cases/${item.caseId}`}><CaseStatusBadge status={item.caseStatus} /></Link> : <span className="muted">No case</span>}
               </td>
             </tr>
           ))}
@@ -390,32 +410,20 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 }
 
 async function getAppointments(query: string, page: number, pageSize: number) {
-  const values: unknown[] = [];
-  let where = "";
-  if (query) {
-    values.push(`%${query}%`);
-    where = `
-      WHERE c.firstname ILIKE $1
-         OR c.lastname ILIKE $1
-         OR c.phone ILIKE $1
-         OR a.category ILIKE $1
-         OR a.appointmentstatus ILIKE $1
-         OR CAST(a.id AS TEXT) ILIKE $1
-    `;
-  }
+  const { condition, values } = buildClientSearch(query, "c", 1, ["a.id::text", "a.category", "a.appointmentstatus"]);
+  const where = condition ? `WHERE ${condition}` : "";
+  const searchOrder = clientSearchOrderSql(query, "c", 1, "a.id::text");
   const limitIndex = values.length + 1;
   const offsetIndex = values.length + 2;
   const offset = (page - 1) * pageSize;
 
   const db = getDb();
-  const countQuery = query
-    ? `
+  const countQuery = `
       SELECT COUNT(*)::int AS total
       FROM "appointments" a
       JOIN "clients" c ON c.id = a.client_id
       ${where}
-    `
-    : `SELECT COUNT(*)::int AS total FROM "appointments"`;
+    `;
   const [result, countResult] = await Promise.all([
     db.query(
       `
@@ -425,15 +433,17 @@ async function getAppointments(query: string, page: number, pageSize: number) {
           a.appointmentstatus,
           a.category,
           a.appointmentdate,
+          c.id AS client_id,
+          c.cnic,
           c.firstname,
           c.lastname,
           c.phone,
-          cc.id AS case_id
+          cc.id AS case_id, cc.status AS case_status
         FROM "appointments" a
         JOIN "clients" c ON c.id = a.client_id
         LEFT JOIN "client_cases" cc ON cc.appointment_id = a.id
         ${where}
-        ORDER BY a.appointmentdate DESC NULLS LAST, a.id DESC
+        ORDER BY ${searchOrder ? `${searchOrder}, ` : ""}a.appointmentdate DESC NULLS LAST, a.id DESC
         LIMIT $${limitIndex} OFFSET $${offsetIndex}
       `,
       [...values, pageSize, offset],
@@ -467,7 +477,7 @@ async function getAppointmentCaseSeed(appointmentId: number) {
         c.firstname,
         c.lastname,
         c.phone,
-        cc.id AS case_id
+        cc.id AS case_id, cc.status AS case_status
       FROM "appointments" a
       JOIN "clients" c ON c.id = a.client_id
       LEFT JOIN "client_cases" cc ON cc.appointment_id = a.id
@@ -537,11 +547,13 @@ function AppointmentModal({
 
 function AppointmentEditModal({
   action,
+  canEditDetails,
   appointment,
   canEditAppointmentPayments,
   closeHref,
 }: {
   action: (formData: FormData) => Promise<void>;
+  canEditDetails: boolean;
   appointment: AppointmentRow;
   canEditAppointmentPayments: boolean;
   closeHref: string;
@@ -559,8 +571,8 @@ function AppointmentEditModal({
           <Field name="fee" label="Fee" type="number" defaultValue={appointment.fee} required />
           <Select name="appointmentstatus" label="Status" options={APPOINTMENT_STATUS_OPTIONS} defaultValue={appointment.statusInputValue} />
         </> : null}
-        <Select name="category" label="Category" options={APPOINTMENT_TYPE_OPTIONS} defaultValue={appointment.category} />
-        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={appointment.dateTimeInput} required />
+        {canEditDetails ? <Select name="category" label="Category" options={APPOINTMENT_TYPE_OPTIONS} defaultValue={appointment.category} /> : <Field name="category_display" label="Category" defaultValue={appointment.category} readOnly />}
+        <Field name="appointmentdate" label="Appointment Date & Time" type="datetime-local" defaultValue={appointment.dateTimeInput} readOnly={!canEditDetails} required />
       </div>
       <button className="btn btnPrimary modalSubmit">Save Appointment</button>
     </form>
@@ -734,6 +746,9 @@ function toAppointmentRow(row: Record<string, any>): AppointmentRow {
   return {
     id: Number(row.id || 0),
     caseId: row.case_id ? Number(row.case_id) : null,
+    caseStatus: row.case_status || "In Progress",
+    clientId: Number(row.client_id || 0),
+    cnic: textFromValue(row.cnic, ""),
     category,
     categoryLabel: appointmentTypeLabel(category),
     dateTimeInput: dateTimeInput(row.appointmentdate),

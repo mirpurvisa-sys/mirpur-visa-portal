@@ -1,4 +1,8 @@
 import Link from "next/link";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
+import { isCaseCompleted } from "@/lib/caseStatus";
+import { completeCase } from "@/app/admin/cases/actions";
+
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
@@ -6,12 +10,15 @@ import { recordActivity } from "@/lib/activityLog";
 import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
+import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
 import { money } from "@/lib/erp";
 import { deleteCaseAutoIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
-export default async function CasesPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+const CASE_PAGE_SIZES = [25, 50, 100];
+
+export default async function CasesPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; pageSize?: string; status?: string }> }) {
   const user = await requireUser();
   if (!canViewResource(user, "cases")) return <AccessDenied />;
 
@@ -21,6 +28,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   const showFinance = canViewFinance(user);
   const params = await searchParams;
   const q = (params.q || "").trim();
+  const pageSize = parsePageSize(params.pageSize);
+  const currentPage = parsePositiveInt(params.page, 1);
+  const status = ["ongoing", "completed"].includes(params.status || "") ? params.status! : "all";
 
   async function deleteCase(formData: FormData) {
     "use server";
@@ -43,10 +53,23 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
     redirect("/admin/cases");
   }
 
-  const values: unknown[] = [];
-  const where = q ? `WHERE (cc.client_name ILIKE $1 OR c.firstname ILIKE $1 OR c.lastname ILIKE $1 OR c.phone ILIKE $1 OR cc."caseCategory" ILIKE $1)` : "";
-  if (q) values.push(`%${q}%`);
-  const result = await getDb().query(
+  const { condition, values } = buildClientSearch(q, "c", 1, ["cc.id::text", "cc.client_name", 'cc."caseCategory"', "cc.status"]);
+  const statusCondition = status === "all" ? "" : `lower(btrim(COALESCE(cc.status,''))) ${status === "completed" ? "IN" : "NOT IN"} ('completed','closed')`;
+  const filters = [condition, statusCondition].filter(Boolean);
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const searchOrder = clientSearchOrderSql(q);
+  const db = getDb();
+  const countResult = await db.query(
+    `SELECT COUNT(*)::int AS total FROM "client_cases" cc JOIN "clients" c ON c.id = cc.client_id ${where}`,
+    values,
+  );
+  const total = Number(countResult.rows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (currentPage > totalPages) redirect(caseListHref({ q, status, page: totalPages, pageSize }));
+  const offset = (currentPage - 1) * pageSize;
+  const limitIndex = values.length + 1;
+  const offsetIndex = values.length + 2;
+  const result = await db.query(
     `
       SELECT
         cc.id,
@@ -57,16 +80,19 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         cc."caseCategory",
         cc."startDate",
         cc.status,
+        EXISTS (SELECT 1 FROM employees assigned WHERE assigned.id=cc.employee_id AND assigned.user_id=$${values.length + 3}) AS is_assigned,
+        c.id AS client_id,
+        c.cnic,
         c.firstname,
         c.lastname,
         c.phone
       FROM "client_cases" cc
       JOIN "clients" c ON c.id = cc.client_id
       ${where}
-      ORDER BY cc."startDate" DESC NULLS LAST, cc.id DESC
-      LIMIT 80
+      ORDER BY ${searchOrder ? `${searchOrder}, ` : ""}cc."startDate" DESC NULLS LAST, cc.id DESC
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
     `,
-    values,
+    [...values, pageSize, offset, user.id],
   );
 
   return <>
@@ -77,9 +103,26 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
     </div>
 
     <section className="panel tableWrap legacyCasePanel">
-      <form className="legacySearch">
-        <label>Search:<input className="input" name="q" defaultValue={q} aria-label="Search cases" /></label>
+      <form className="legacySearch" action="/admin/cases" style={{ gap: 8, flexWrap: "wrap" }}>
+        <input type="hidden" name="pageSize" value={pageSize} />
+        <label>Cases:<select className="input smallSelect" name="status" defaultValue={status}><option value="all">All cases</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option></select></label>
+        <label htmlFor="case-search">Search:<input id="case-search" className="input" name="q" defaultValue={q} placeholder="Name, ID, CNIC or phone" aria-describedby="case-search-help" /></label>
+        <button className="btn" type="submit">Search</button>
       </form>
+      <p id="case-search-help" className="muted">Search by client name, ID, reference, CNIC, phone, email, city, address, passport, visa details, or case ID, category and status.</p>
+      <div className="tableControlBar">
+        <p className="muted">Showing {result.rows.length ? offset + 1 : 0}-{result.rows.length ? offset + result.rows.length : 0} of {total} cases</p>
+        <form className="pageSizeForm" action="/admin/cases">
+          <input type="hidden" name="status" value={status} />
+          {q ? <input type="hidden" name="q" value={q} /> : null}
+          <label>Rows:
+            <select className="input smallSelect" name="pageSize" defaultValue={pageSize}>
+              {CASE_PAGE_SIZES.map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          <button className="btn" type="submit">Apply</button>
+        </form>
+      </div>
       <table className="table dataTable legacyCaseTable">
         <thead><tr>
           <th>Client<br/>Photo</th>
@@ -93,9 +136,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         </tr></thead>
         <tbody>{result.rows.map((row) => {
           const clientName = row.client_name || `${row.firstname || ""} ${row.lastname || ""}`.trim();
-          return <tr key={row.id}>
+          return <tr key={row.id} className={isCaseCompleted(row.status) ? "caseCompletedRow" : undefined}>
             <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
-            <td>{clientName || "-"}</td>
+            <td>{clientName || "-"}<br /><small className="muted">Case ID: {row.id} · Client ID: {row.client_id}</small>{row.cnic ? <><br /><small className="muted">CNIC: {row.cnic}</small></> : null}</td>
             <td>{row.phone || "-"}</td>
             {showFinance ? <>
               <td>{plainMoney(row.total)}</td>
@@ -104,8 +147,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
             </> : null}
             <td>{row.caseCategory || "-"}</td>
             <td>{formatDate(row.startDate)}</td>
-            <td>{formatStatus(row.status)}</td>
+            <td><CaseStatusBadge status={row.status} /></td>
             <td className="actionColumn"><div className="actionStack vertical">
+              {row.is_assigned && !isCaseCompleted(row.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={row.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
               <Link className="actionBtn view" href={`/admin/cases/${row.id}`} aria-label={`View case for ${clientName}`}><Eye size={18}/></Link>
               {canEdit ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
               {canDelete ? <form action={deleteCase}><input type="hidden" name="id" value={row.id}/><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18}/></button></form> : null}
@@ -114,12 +158,37 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
         })}</tbody>
       </table>
       {result.rows.length === 0 ? <div className="emptyState">No data available in table</div> : null}
+      <nav className="paginationBar" aria-label="Cases pages">
+        {currentPage > 1 ? <Link className="btn" href={caseListHref({ q, status, page: currentPage - 1, pageSize })}>Previous</Link> : <span className="btn disabledBtn">Previous</span>}
+        <span>Page {currentPage} of {totalPages}</span>
+        {currentPage < totalPages ? <Link className="btn" href={caseListHref({ q, status, page: currentPage + 1, pageSize })}>Next</Link> : <span className="btn disabledBtn">Next</span>}
+      </nav>
     </section>
   </>;
 }
 
 function AccessDenied() {
   return <div className="panel"><h1>Cases</h1><p className="muted">You do not have permission to access case operations.</p></div>;
+}
+
+function caseListHref(params: { q: string; page: number; pageSize: number; status?: string }) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.status && params.status !== "all") search.set("status", params.status);
+  if (params.page > 1) search.set("page", String(params.page));
+  if (params.pageSize !== CASE_PAGE_SIZES[0]) search.set("pageSize", String(params.pageSize));
+  const queryString = search.toString();
+  return queryString ? `/admin/cases?${queryString}` : "/admin/cases";
+}
+
+function parsePageSize(value: unknown) {
+  const parsed = Number(value);
+  return CASE_PAGE_SIZES.includes(parsed) ? parsed : CASE_PAGE_SIZES[0];
+}
+
+function parsePositiveInt(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function plainMoney(value: unknown) {

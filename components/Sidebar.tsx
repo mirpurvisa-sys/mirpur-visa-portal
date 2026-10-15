@@ -11,6 +11,8 @@ export function Sidebar({ user }: { user: CurrentUser }){
     { href: "/admin/cases", label: "Client Management", icon: <BriefcaseBusiness size={18}/>, show: canViewResource(user, "cases") || canViewResource(user, "clients") },
     { href: "/admin/appointments", label: "Appointments", icon: <CalendarClock size={18}/>, show: canViewResource(user, "appointments") },
     { href: "/admin/expenses", label: "Money Trail", icon: <WalletCards size={18}/>, show: canViewFinance(user) },
+    { href: "/admin/payments?tab=income", label: "Income", icon: <WalletCards size={18}/>, show: canViewFinance(user) },
+    { href: "/admin/case-installments", label: "Case Installments", icon: <WalletCards size={18}/>, show: canViewResource(user, "case-installments") },
     { href: "/admin/employees", label: "Team Management", icon: <UsersRound size={18}/>, show: canViewResource(user, "employees") },
   ].filter((item) => item.show);
   const workflowResourceKeys = new Set(["clients", "cases", "appointments", "employees", "incomes", "expenses", "case-installments"]);
