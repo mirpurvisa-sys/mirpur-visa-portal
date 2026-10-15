@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant, isCaseOfficer, hasOwnCaseAccessOnly } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
@@ -31,7 +31,8 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   const pageSize = parsePageSize(params.pageSize);
   const currentPage = parsePositiveInt(params.page, 1);
   const status = ["ongoing", "completed"].includes(params.status || "") ? params.status! : "all";
-  const assigned = params.assigned === "me" ? "me" : "all";
+  const ownCasesOnly = hasOwnCaseAccessOnly(user);
+  const assigned = ownCasesOnly || params.assigned === "me" ? "me" : "all";
 
   async function deleteCase(formData: FormData) {
     "use server";
@@ -103,8 +104,8 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
 
   return <>
     <div className="workflowGrid">
-      <Link className="workflowCard" href="/admin/clients"><strong>Clients</strong><span>Client records</span></Link>
-      <Link className="workflowCard" href="/admin/appointments"><strong>Appointments</strong><span>Bookings</span></Link>
+      {canViewResource(user, "clients") ? <Link className="workflowCard" href="/admin/clients"><strong>Clients</strong><span>Client records</span></Link> : null}
+      {canViewResource(user, "appointments") ? <Link className="workflowCard" href="/admin/appointments"><strong>Appointments</strong><span>Bookings</span></Link> : null}
       <Link className="workflowCard active" href="/admin/cases"><strong>Cases</strong><span>Case files</span></Link>
     </div>
 
@@ -112,7 +113,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
       <form className="legacySearch" action="/admin/cases" style={{ gap: 8, flexWrap: "wrap" }}>
         <input type="hidden" name="pageSize" value={pageSize} />
         <label>Cases:<select className="input smallSelect" name="status" defaultValue={status}><option value="all">All cases</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option></select></label>
-        <label>Assigned:<select className="input" name="assigned" defaultValue={assigned}><option value="all">All cases</option><option value="me">My assigned cases</option></select></label>
+        <label>Assigned:<select className="input" name="assigned" defaultValue={assigned}>{!ownCasesOnly ? <option value="all">All cases</option> : null}<option value="me">My assigned cases</option></select></label>
         <label htmlFor="case-search">Search:<input id="case-search" className="input" name="q" defaultValue={q} placeholder="Name, ID, CNIC or phone" aria-describedby="case-search-help" /></label>
         <button className="btn" type="submit">Search</button>
       </form>
@@ -159,7 +160,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
             <td className="actionColumn"><div className="actionStack vertical">
               {row.is_assigned && !isCaseCompleted(row.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={row.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
               <Link className="actionBtn view" href={`/admin/cases/${row.id}`} aria-label={`View case for ${clientName}`}><Eye size={18}/></Link>
-              {canEdit || (isAccountant(user) && row.is_assigned) ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
+              {canEdit || ((isAccountant(user) || isCaseOfficer(user)) && row.is_assigned) ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
               {canDelete ? <form action={deleteCase}><input type="hidden" name="id" value={row.id}/><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18}/></button></form> : null}
             </div></td>
           </tr>;

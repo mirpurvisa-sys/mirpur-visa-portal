@@ -8,9 +8,11 @@ import { notFound, redirect } from "next/navigation";
 import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource, canWorkOnCase } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource, canWorkOnCase, canAssignCases } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
+import { caseVisibilitySql } from "@/lib/caseAccess";
+import type { CurrentUser } from "@/lib/auth";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
 import { deleteCaseAutoIncome, deleteCaseInstallmentIncome, syncAppointmentIncome, syncCaseInstallmentIncome } from "@/lib/incomeSync";
 import { deleteCaseDocumentFromStorage, storagePathFromDocumentValue, uploadCaseDocumentToStorage } from "@/lib/supabaseStorage";
@@ -34,13 +36,13 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   const installmentResource = getResource("case-installments");
   const canDeleteInstallments = Boolean(installmentResource && canDeleteResource(user, installmentResource));
 
-  const [caseRow, installments, employees, documents] = await Promise.all([
-    getCase(caseId),
+  const caseRow = await getCase(caseId, user);
+  if (!caseRow) notFound();
+  const [installments, employees, documents] = await Promise.all([
     showFinance ? getInstallments(caseId) : Promise.resolve([]),
-    employeeOptions(),
+    canAssignCases(user) ? employeeOptions() : Promise.resolve([{ id: Number(caseRow.employee_id), label: [caseRow.employee_firstname, caseRow.employee_lastname].filter(Boolean).join(' ') }]),
     getCaseDocuments(caseId),
   ]);
-  if (!caseRow) notFound();
   const assignedUser = await getDb().query(`SELECT user_id FROM employees WHERE id=$1`, [caseRow.employee_id]);
   canEdit = canWorkOnCase(user, assignedUser.rows[0]?.user_id);
   const canComplete = Number(assignedUser.rows[0]?.user_id) === user.id && !isCaseCompleted(caseRow.status);
@@ -69,7 +71,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
             city=$8, province=$9, country=$10, address=$11, destination_country=$12,
             visa_category=$13, passport_no=$14, passport_issue=$15, passport_expiry=$16,
             documents=$17, updated_at=NOW()
-        WHERE id=$18
+        WHERE id=$18 AND EXISTS (SELECT 1 FROM client_cases cc LEFT JOIN employees owner ON owner.id=cc.employee_id WHERE cc.id=$19 AND cc.client_id=clients.id AND ($21::boolean OR owner.user_id=$20))
       `,
       [
         text(formData, "firstname"),
@@ -89,7 +91,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
         nullableText(formData, "passport_issue"),
         nullableText(formData, "passport_expiry"),
         nullableText(formData, "documents"),
-        Number(currentCase.client_id),
+        Number(currentCase.client_id), caseId, currentUser.id, canAssignCases(currentUser),
       ],
     );
 
@@ -148,18 +150,22 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const appointmentStatus = currentCanViewFinance ? text(formData, "appointmentstatus", "Unpaid") : textFromValue(existingRow.appointmentstatus, "Unpaid");
     const appointmentId = Number(existingRow.appointment_id || 0);
 
-    await db.query(
+    const changed = await db.query(
       `
-        UPDATE "client_cases"
-        SET employee_id=$1, client_name=$2, total=$3, advance=$4, "caseCategory"=$5,
+        WITH changed AS (UPDATE "client_cases"
+        SET employee_id=CASE WHEN $24::boolean THEN $1 ELSE employee_id END, client_name=$2, total=$3, advance=$4, "caseCategory"=$5,
             "startDate"=$6, "endDate"=$7, submitted_on=$8, travel_dates=$9, docs=$10,
             email_gen=$11, travel_history=$12, previous_refusal=$13, vfa=$14, dfa=$15,
             personal_documents=$16, job_documents=$17, business_documents=$18,
             documents_note=$19, status=$20, description=$21, updated_at=NOW()
-        WHERE id=$22
+        WHERE id=$22 AND ($24::boolean OR EXISTS (SELECT 1 FROM employees owner WHERE owner.id=client_cases.employee_id AND owner.user_id=$23))
+        RETURNING id, appointment_id),
+        appointment AS (UPDATE appointments a SET appointmentstatus=$25, category=$26, appointmentdate=$27, fee=$28, updated_at=NOW()
+          FROM changed WHERE a.id=changed.appointment_id RETURNING a.id)
+        SELECT id FROM changed
       `,
       [
-        currentResource && canEditResource(currentUser, currentResource) ? numberValue(formData, "employee_id") : Number(currentCase.employee_id),
+        canAssignCases(currentUser) ? numberValue(formData, "employee_id") : Number(currentCase.employee_id),
         text(formData, "client_name"),
         totalValue,
         advanceValue,
@@ -180,20 +186,14 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
         nullableText(formData, "documents_note"),
         text(formData, "status", "Open"),
         nullableText(formData, "description"),
-        caseId,
-      ],
-    );
-
-    await db.query(
-      `UPDATE "appointments" SET appointmentstatus=$1, category=$2, appointmentdate=$3, fee=$4, updated_at=NOW() WHERE id=$5`,
-      [
+        caseId, currentUser.id, canAssignCases(currentUser),
         appointmentStatus,
         text(formData, "appointment_category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
         appointmentFee,
-        appointmentId,
       ],
     );
+    if (!changed.rows.length) throw new Error("You can only work on cases assigned to you.");
 
     await syncCaseTotals(caseId);
     await syncAppointmentIncome(appointmentId);
@@ -285,10 +285,15 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     for (const file of uploadedFiles) {
       if (file.size > MAX_CASE_DOCUMENT_SIZE) throw new Error(`${file.name} is larger than 20MB.`);
       const uploaded = await uploadCaseDocumentToStorage(caseId, file);
-      await db.query(
-        `INSERT INTO "documents" (client_case_id, document, document_type, created_at, updated_at) VALUES ($1,$2,$3,NOW(),NOW())`,
-        [caseId, uploaded.path, documentType],
+      const inserted = await db.query(
+        `INSERT INTO "documents" (client_case_id, document, document_type, created_at, updated_at)
+          SELECT cc.id,$2,$3,NOW(),NOW() FROM client_cases cc WHERE cc.id=$1 AND ($5::boolean OR EXISTS (SELECT 1 FROM employees owner WHERE owner.id=cc.employee_id AND owner.user_id=$4)) RETURNING id`,
+        [caseId, uploaded.path, documentType, currentUser.id, canAssignCases(currentUser)],
       );
+      if (!inserted.rows.length) {
+        await deleteCaseDocumentFromStorage(uploaded.path);
+        throw new Error("You can only work on cases assigned to you.");
+      }
     }
 
     await recordActivity({
@@ -316,9 +321,10 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     const document = result.rows[0];
     if (!document) throw new Error("Document not found.");
 
+    const deleted = await db.query(`DELETE FROM documents d USING client_cases cc WHERE d.id=$1 AND d.client_case_id=$2 AND cc.id=d.client_case_id AND ($4::boolean OR EXISTS (SELECT 1 FROM employees owner WHERE owner.id=cc.employee_id AND owner.user_id=$3)) RETURNING d.id`, [documentId, caseId, currentUser.id, canAssignCases(currentUser)]);
+    if (!deleted.rows.length) throw new Error("You can only work on cases assigned to you.");
     const storagePath = storagePathFromDocumentValue(document.document);
     if (storagePath) await deleteCaseDocumentFromStorage(storagePath);
-    await db.query(`DELETE FROM "documents" WHERE id=$1 AND client_case_id=$2`, [documentId, caseId]);
     await recordActivity({
       user: currentUser,
       action: "deleted",
@@ -442,7 +448,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <Field formId={formId} name="endDate" label="End Date" type="date" defaultValue={dateInput(caseRow.endDate)} />
           <Field formId={formId} name="submitted_on" label="Submitted on" type="date" defaultValue={dateInput(caseRow.submitted_on)} />
           <Field formId={formId} name="travel_dates" label="Travel Dates" defaultValue={caseRow.travel_dates} />
-          <EmployeeSelect formId={formId} employees={employees} value={caseRow.employee_id} disabled={!resource || !canEditResource(user, resource)} />
+          <EmployeeSelect formId={formId} employees={employees} value={caseRow.employee_id} disabled={!canAssignCases(user)} />
           <Field formId={formId} name="description" label="Description" defaultValue={caseRow.description} wide />
           <Select formId={formId} name="appointment_category" label="Appointment Type" value={caseRow.appointment_category || "visit"} options={[{ value: "online", label: "Online" }, { value: "visit", label: "Physical / Visit" }]} />
           {showFinance ? <Select formId={formId} name="appointmentstatus" label="Appointment Payment" value={caseRow.appointmentstatus || "Unpaid"} options={["Paid", "Unpaid"]} /> : null}
@@ -494,7 +500,9 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   </>;
 }
 
-async function getCase(caseId: number) {
+async function getCase(caseId: number, user: CurrentUser) {
+  const values: any[] = [caseId];
+  const visibility = caseVisibilitySql(user, "cc", values);
   const result = await getDb().query(
     `
       SELECT
@@ -507,10 +515,10 @@ async function getCase(caseId: number) {
       JOIN "clients" c ON c.id = cc.client_id
       LEFT JOIN "appointments" a ON a.id = cc.appointment_id
       LEFT JOIN "employees" e ON e.id = cc.employee_id
-      WHERE cc.id = $1
+      WHERE cc.id = $1 AND ${visibility}
       LIMIT 1
     `,
-    [caseId],
+    values,
   );
   return result.rows[0] ?? null;
 }

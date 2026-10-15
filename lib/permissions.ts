@@ -39,6 +39,19 @@ export function isAdmin(user: CurrentUser) {
   return user.roleSlugs.includes("admin") || user.userType?.toLowerCase() === "admin";
 }
 
+export function isCaseOfficer(user: CurrentUser) {
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return user.roleSlugs.some((role) => normalize(role) === "case_officer") || normalize(user.userType || "") === "case_officer";
+}
+
+export function hasOwnCaseAccessOnly(user: CurrentUser) {
+  return !isAdmin(user) && isCaseOfficer(user);
+}
+
+export function canAssignCases(user: CurrentUser) {
+  return isAdmin(user);
+}
+
 export function canViewFinance(user: CurrentUser) {
   return isAdmin(user) || isAccountant(user);
 }
@@ -51,11 +64,9 @@ export function canManageCaseFinance(user: CurrentUser) {
   return canViewResource(user, "cases") && canViewFinance(user);
 }
 
-// Accountants also act as case officers, but only for cases assigned to their login.
+// Operational case work is always tied to assignment; global resource flags cannot grant it.
 export function canWorkOnCase(user: CurrentUser, assignedUserId: unknown) {
-  const resource = resources.find((item) => item.key === "cases");
-  return Boolean(resource && canEditResource(user, resource)) ||
-    (isAccountant(user) && Number(assignedUserId) === user.id);
+  return isAdmin(user) || ((isCaseOfficer(user) || isAccountant(user)) && Number(assignedUserId) === user.id);
 }
 
 export function canManageAppointmentPayments(user: CurrentUser) {
@@ -101,6 +112,7 @@ export function allowedResources(user: CurrentUser) {
 
 export function canViewResource(user: CurrentUser, resourceKey: string) {
   if (isAdmin(user)) return true;
+  if (isCaseOfficer(user) && !isAccountant(user)) return resourceKey === "cases";
   if (isAccountant(user) && ROLE_RESOURCES.accountant.includes(resourceKey)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resourceKey)) return false;
   return user.roleSlugs.some((role) => ROLE_RESOURCES[role]?.includes(resourceKey));
@@ -121,7 +133,7 @@ export function canCreateResource(user: CurrentUser, resource: Resource) {
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;
 
-  if (resource.key === "cases") return user.permissionSlugs.includes("start-cases");
+  if (resource.key === "cases") return canAssignCases(user);
 
   return hasRoleResource(user, resource.key, ROLE_CREATE_RESOURCES);
 }
@@ -133,13 +145,14 @@ export function canEditResource(user: CurrentUser, resource: Resource) {
   if (!canViewResource(user, resource.key)) return false;
 
   if (resource.key === "clients") return user.permissionSlugs.includes("edit-clients");
-  if (resource.key === "cases") return user.permissionSlugs.includes("assign-cases") || user.roleSlugs.includes("case_officer");
+  if (resource.key === "cases") return canAssignCases(user);
 
   return hasRoleResource(user, resource.key, ROLE_EDIT_RESOURCES);
 }
 
 export function canDeleteResource(user: CurrentUser, resource: Resource) {
   if (isAdmin(user)) return true;
+  if (resource.key === "cases") return false;
   if (isAccountant(user) && FINANCE_RESOURCE_KEYS.has(resource.key)) return true;
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;

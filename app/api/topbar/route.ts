@@ -4,7 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getCaseNotificationFeed } from "@/lib/caseNotifications";
 import { buildClientSearch, clientReferenceSql, clientSearchOrderSql } from "@/lib/clientSearch";
-import { canViewFinance, canViewResource } from "@/lib/permissions";
+import { canViewFinance, canViewResource, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import { caseVisibilitySql } from "@/lib/caseAccess";
 import type { TopbarSearchItem } from "@/components/TopbarDropdowns";
 
 export const dynamic = "force-dynamic";
@@ -36,9 +37,9 @@ function topbarScope(value: string | null): TopbarScope {
 }
 
 async function getProfileHref(user: CurrentUser) {
-  if (!canViewResource(user, "employees")) return "/admin";
+  if (!canViewResource(user, "employees") && !hasOwnCaseAccessOnly(user)) return "/admin";
   const result = await getDb().query(`SELECT id FROM "employees" WHERE user_id=$1 LIMIT 1`, [user.id]);
-  return result.rows[0]?.id ? `/admin/employees/${result.rows[0].id}` : "/admin/employees";
+  return result.rows[0]?.id ? `/admin/employees/${result.rows[0].id}` : hasOwnCaseAccessOnly(user) ? "/admin/cases?assigned=me" : "/admin/employees";
 }
 
 async function getTopbarSearchItems(user: CurrentUser, query: string): Promise<TopbarSearchItem[]> {
@@ -74,7 +75,7 @@ async function getTopbarSearchItems(user: CurrentUser, query: string): Promise<T
 
   const dynamicItems = await Promise.all([
     canViewResource(user, "clients") ? getClientSearchItems(query) : Promise.resolve([]),
-    canViewResource(user, "cases") ? getCaseSearchItems(query) : Promise.resolve([]),
+    canViewResource(user, "cases") ? getCaseSearchItems(user, query) : Promise.resolve([]),
     canViewResource(user, "appointments") ? getAppointmentSearchItems(query) : Promise.resolve([]),
     canViewResource(user, "employees") ? getEmployeeSearchItems(query) : Promise.resolve([]),
   ]);
@@ -107,14 +108,15 @@ async function getClientSearchItems(query: string): Promise<TopbarSearchItem[]> 
   });
 }
 
-async function getCaseSearchItems(query: string): Promise<TopbarSearchItem[]> {
+async function getCaseSearchItems(user: CurrentUser, query: string): Promise<TopbarSearchItem[]> {
   const search = buildClientSearch(query, "c", 1, ["cc.id::text", "cc.client_name", 'cc."caseCategory"', "cc.status"]);
   const searchOrder = clientSearchOrderSql(query);
+  const visibility = caseVisibilitySql(user, "cc", search.values);
   const result = await getDb().query(`
     SELECT cc.id, cc.client_name, cc."caseCategory", cc.status, c.firstname, c.lastname
     FROM "client_cases" cc
     LEFT JOIN "clients" c ON c.id = cc.client_id
-    ${search.condition ? `WHERE ${search.condition}` : ""}
+    WHERE ${[search.condition, visibility].filter(Boolean).join(" AND ")}
     ORDER BY ${searchOrder ? `${searchOrder}, ` : ""}cc.id DESC
     LIMIT 8
   `, search.values);

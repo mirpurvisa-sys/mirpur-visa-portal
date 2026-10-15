@@ -6,7 +6,9 @@ import { completeCase } from "@/app/admin/cases/actions";
 import { notFound, redirect } from "next/navigation";
 import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, canWorkOnCase, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import type { CurrentUser } from "@/lib/auth";
+import { caseVisibilitySql } from "@/lib/caseAccess";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
@@ -54,9 +56,9 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
   if (!Number.isFinite(employeeId) || employeeId <= 0) notFound();
 
   const user = await requireUser();
-  if (!canViewResource(user, "employees")) return <AccessDenied />;
+  if (!canViewResource(user, "employees") && !hasOwnCaseAccessOnly(user)) return <AccessDenied />;
 
-  const employee = await getEmployee(employeeId);
+  const employee = await getEmployee(employeeId, hasOwnCaseAccessOnly(user) ? user.id : null);
   if (!employee) notFound();
 
   const casesResource = getResource("cases");
@@ -65,7 +67,7 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
   const canEditCases = casesResource ? canEditResource(user, casesResource) : false;
   const canDeleteCases = casesResource ? canDeleteResource(user, casesResource) : false;
   const showFinance = canViewFinance(user);
-  const assignedCases = await getAssignedCases(employeeId);
+  const assignedCases = await getAssignedCases(employeeId, user);
   const name = employeeName(employee);
 
   async function deleteCase(formData: FormData) {
@@ -152,7 +154,7 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
                   <div className="actionStack vertical">
                     {Number(employee.user_id) === user.id && !isCaseCompleted(caseRow.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={caseRow.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
                     <Link className="actionBtn view" href={`/admin/cases/${caseRow.id}`} aria-label={`View case for ${clientName}`}><Eye size={18} /></Link>
-                    {canEditCases || (isAccountant(user) && Number(employee.user_id) === user.id) ? <Link className="actionBtn edit" href={`/admin/cases/${caseRow.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18} /></Link> : null}
+                    {canWorkOnCase(user, employee.user_id) ? <Link className="actionBtn edit" href={`/admin/cases/${caseRow.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18} /></Link> : null}
                     {canDeleteCases ? <form action={deleteCase}><input type="hidden" name="id" value={caseRow.id} /><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18} /></button></form> : null}
                   </div>
                 </td>
@@ -166,7 +168,7 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
   </>;
 }
 
-async function getEmployee(id: number): Promise<EmployeeDetail | null> {
+async function getEmployee(id: number, ownUserId: number | null): Promise<EmployeeDetail | null> {
   const result = await getDb().query(
     `
       SELECT
@@ -175,15 +177,17 @@ async function getEmployee(id: number): Promise<EmployeeDetail | null> {
         u.email AS user_email, u.cnic, u.gender, u.avatar
       FROM "employees" e
       LEFT JOIN "users" u ON u.id = e.user_id
-      WHERE e.id=$1
+      WHERE e.id=$1 AND ($2::bigint IS NULL OR e.user_id=$2)
       LIMIT 1
     `,
-    [id],
+    [id, ownUserId],
   );
   return result.rows[0] || null;
 }
 
-async function getAssignedCases(employeeId: number): Promise<AssignedCase[]> {
+async function getAssignedCases(employeeId: number, user: CurrentUser): Promise<AssignedCase[]> {
+  const values: any[] = [employeeId];
+  const visibility = caseVisibilitySql(user, "cc", values);
   const result = await getDb().query(
     `
       SELECT
@@ -191,11 +195,11 @@ async function getAssignedCases(employeeId: number): Promise<AssignedCase[]> {
         c.firstname, c.lastname, c.phone
       FROM "client_cases" cc
       LEFT JOIN "clients" c ON c.id = cc.client_id
-      WHERE cc.employee_id=$1
+      WHERE cc.employee_id=$1 AND ${visibility}
       ORDER BY cc."startDate" DESC NULLS LAST, cc.id DESC
       LIMIT 100
     `,
-    [employeeId],
+    values,
   );
   return result.rows;
 }

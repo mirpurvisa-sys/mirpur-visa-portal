@@ -75,7 +75,7 @@ test("accountants can work on their own assigned case without general case-edit 
   assert.equal(permissions.canWorkOnCase(accountant, undefined), false);
   assert.equal(permissions.canWorkOnCase(user("", { userType: "Accountant", roleSlugs: [] }), 7), true);
   assert.equal(permissions.canWorkOnCase(user("teacher"), 7), false);
-  assert.equal(permissions.canWorkOnCase(user("case_officer"), 8), true);
+  assert.equal(permissions.canWorkOnCase(user("case_officer"), 8), false);
   assert.equal(permissions.canWorkOnCase(user("admin"), 8), true);
 });
 test("financial fields and entered values remain available to accountant forms", () => {
@@ -133,6 +133,7 @@ function actionContext(currentUser = accountant) {
     canManageCaseFinance: permissions.canManageCaseFinance,
     canViewResource: permissions.canViewResource,
     canEditResource: permissions.canEditResource,
+    canAssignCases: permissions.canAssignCases,
     canManageAppointmentPayments: permissions.canManageAppointmentPayments,
     getResource: config.getResource,
     getDb: () => db, caseId: 91,
@@ -242,7 +243,7 @@ function assignedContext(assignedUserId) {
   context.globals.getDb = () => ({ async query(sql, values) {
     context.queries.push({ sql, values });
     if (sql.includes("SELECT cc.client_id")) return { rows: [{ client_id: 25, employee_id: 100, user_id: assignedUserId }] };
-    return { rows: [] };
+    return { rows: /UPDATE "client_cases"/.test(sql) ? [{ id: 91 }] : [] };
   } });
   context.globals.requireCaseWork = serverFunction("../app/admin/cases/[id]/page.tsx", "requireCaseWork", context.globals);
   return context;
@@ -262,7 +263,7 @@ test("editing a client from an assigned case ignores a forged client ID", async 
   const form = new FormData(); form.set("client_id", "999"); form.set("firstname", "Example");
   await assert.rejects(action(form), error => error.location === "/admin/cases/91");
   assert.equal(context.queries.length, 2);
-  assert.equal(context.queries[1].values.at(-1), 25);
+  assert.equal(context.queries[1].values[17], 25);
 });
 test("an accountant cannot reassign their case through a forged update form", async () => {
   const context = assignedContext(7);
@@ -277,4 +278,107 @@ test("an accountant cannot reassign their case through a forged update form", as
   const update = context.queries.find(query => query.sql.includes('UPDATE "client_cases"'));
   assert.ok(update);
   assert.equal(update.values[0], 100);
+});
+
+const access = evaluate(readFileSync(new URL("../lib/caseAccess.ts", import.meta.url), "utf8"), { "./permissions": permissions });
+for (const officer of [user("case_officer"), user("Case Officer"), user("", { userType: "Case Officer", roleSlugs: [] })]) {
+  test("officer assignment restrictions override broad permission flags: " + JSON.stringify(officer.roleSlugs), () => {
+    officer.permissionSlugs = ["assign-cases", "start-cases", "delete", "edit-clients", "global-search"];
+    assert.equal(permissions.hasOwnCaseAccessOnly(officer), true);
+    assert.equal(permissions.canWorkOnCase(officer, 7), true);
+    assert.equal(permissions.canWorkOnCase(officer, 8), false);
+    assert.equal(permissions.canAssignCases(officer), false);
+    for (const key of ["clients", "appointments", "employees", "documents", "families", "roles", "users"]) assert.equal(permissions.canViewResource(officer, key), false);
+    for (const operation of ["canCreateResource", "canEditResource", "canDeleteResource"]) assert.equal(permissions[operation](officer, resource("cases")), false);
+  });
+}
+for (const name of ["updateClient", "updateCase", "uploadDocuments", "deleteDocument"]) {
+  test("officer cannot invoke " + name + " for another officer's case", async () => {
+    const context = assignedContext(8);
+    context.globals.requireUser = async () => user("case_officer");
+    context.globals.requireCaseWork = serverFunction("../app/admin/cases/[id]/page.tsx", "requireCaseWork", context.globals);
+    const action = serverFunction("../app/admin/cases/[id]/page.tsx", name, context.globals);
+    await assert.rejects(action(new FormData()), /assigned to you/);
+    assert.equal(context.queries.length, 1);
+  });
+}
+test("case visibility uses session identity and preserves existing search parameters", () => {
+  const values = ["%Example%"];
+  const sql = access.caseVisibilitySql(user("case_officer"), "cc", values);
+  assert.deepEqual(values, ["%Example%", 7]);
+  assert.match(sql, /user_id=\$2/);
+  assert.match(sql, /cc.employee_id/);
+  assert.throws(() => access.caseVisibilitySql(user("case_officer"), "cc; DROP TABLE clients", []));
+  const adminValues = [];
+  assert.equal(access.caseVisibilitySql(user("admin"), "cc", adminValues), "TRUE");
+  assert.equal(adminValues.length, 0);
+});
+
+test("database isolation of case pages, search, profiles, documents and reassignment", { skip: process.env.RUN_DATABASE_ACCESS_TESTS !== "1" }, async t => {
+  require("dotenv").config({ path: ".env.local", quiet: true });
+  require("dotenv").config({ quiet: true });
+  const url = new URL(process.env.DATABASE_URL); url.searchParams.delete("sslmode");
+  const db = new (require("pg").Client)({ connectionString: url.toString(), ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 8000 });
+  await db.connect();
+  try {
+    await db.query("BEGIN");
+    await db.query("SET LOCAL statement_timeout = '8s'");
+    // Temporary empty copies have no application triggers and never mutate customer data.
+    for (const table of ["users", "employees", "clients", "client_cases", "appointments", "documents"]) {
+      await db.query('CREATE TEMP TABLE "' + table + '" ON COMMIT DROP AS SELECT * FROM public."' + table + '" WHERE false');
+    }
+    await db.query("SET LOCAL search_path TO pg_temp, pg_catalog");
+    await db.query("INSERT INTO employees (id,user_id,firstname) VALUES (100,7,'First'),(200,8,'Second')");
+    await db.query("INSERT INTO clients (id,firstname,lastname) VALUES (25,'Example','Client'),(26,'Other','Client')");
+    await db.query("INSERT INTO client_cases (id,client_id,employee_id,client_name,status) VALUES (91,25,100,'Example Client','Open'),(92,26,200,'Other Client','Open'),(93,26,NULL,'Unassigned','Open')");
+    const globals = { getDb: () => db, caseVisibilitySql: access.caseVisibilitySql, buildClientSearch: (await import('../lib/clientSearch.ts')).buildClientSearch, clientSearchOrderSql: (await import('../lib/clientSearch.ts')).clientSearchOrderSql };
+    const getCase = serverFunction("../app/admin/cases/[id]/page.tsx", "getCase", globals);
+    const search = serverFunction("../app/api/topbar/route.ts", "getCaseSearchItems", globals);
+    const profile = serverFunction("../app/admin/employees/[id]/page.tsx", "getEmployee", globals);
+    const assigned = serverFunction("../app/admin/employees/[id]/page.tsx", "getAssignedCases", globals);
+    const officer = user("case_officer");
+    await t.test("direct case IDs return only the assigned case", async () => {
+      assert.equal(Number((await getCase(91, officer)).id), 91);
+      assert.equal(await getCase(92, officer), null);
+      assert.equal(await getCase(93, officer), null);
+      assert.equal(Number((await getCase(92, user("admin"))).id), 92);
+    });
+    await t.test("recent cases and searches never return another officer's records", async () => {
+      assert.deepEqual(Array.from(await search(officer, ""), x => x.href), ["/admin/cases/91"]);
+      assert.equal((await search(officer, "Other")).length, 0);
+      assert.equal((await search(user("admin"), "Other")).length, 2);
+    });
+    await t.test("profile IDs and assigned lists reject another officer", async () => {
+      assert.equal(Number((await profile(100, 7)).id), 100);
+      assert.equal(await profile(200, 7), null);
+      assert.equal((await assigned(100, officer)).length, 1);
+      assert.equal((await assigned(200, officer)).length, 0);
+    });
+    await t.test("document download rejects a different case even with a valid document ID", async () => {
+      await db.query("INSERT INTO documents (id,client_case_id,document) VALUES (1,91,'/own.pdf'),(2,92,'/other.pdf')");
+      const route = serverFunction("../app/admin/cases/[id]/documents/[documentId]/route.ts", "GET", { ...globals,
+        requireUser: async () => officer, canViewResource: permissions.canViewResource,
+        stringValue: value => value == null ? "" : String(value), storagePathFromDocumentValue: () => null,
+        NextResponse: { json: (body, options) => ({ body, status: options.status }), redirect: href => ({ href, status: 307 }) },
+      });
+      assert.equal((await route({}, { params: Promise.resolve({id:"91",documentId:"1"}) })).href, "/own.pdf");
+      assert.equal((await route({}, { params: Promise.resolve({id:"92",documentId:"2"}) })).status, 404);
+      assert.equal((await route({}, { params: Promise.resolve({id:"91",documentId:"2"}) })).status, 404);
+    });
+    await t.test("forged assignment cannot reassign and stale writes fail", async () => {
+      const context = assignedContext(7);
+      Object.assign(context.globals, globals, { requireUser: async () => officer, canViewFinance: permissions.canViewFinance, dateValue: () => null, dateTimeValue: () => null, checkboxValue: () => 0, textFromValue: (v,f) => v || f });
+      context.globals.requireCaseWork = serverFunction("../app/admin/cases/[id]/page.tsx", "requireCaseWork", context.globals);
+      const action = serverFunction("../app/admin/cases/[id]/page.tsx", "updateCase", context.globals);
+      const form = new FormData(); form.set("employee_id", "200"); form.set("client_name", "Edited");
+      await assert.rejects(action(form), e => e.location === "/admin/cases/91");
+      assert.equal(Number((await db.query("SELECT employee_id FROM client_cases WHERE id=91")).rows[0].employee_id), 100);
+      // Simulate reassignment after the action's first authorization check.
+      context.globals.requireCaseWork = async () => ({client_id:25, employee_id:100, user_id:7});
+      await db.query("UPDATE client_cases SET employee_id=200 WHERE id=91");
+      const staleAction = serverFunction("../app/admin/cases/[id]/page.tsx", "updateCase", context.globals);
+      await assert.rejects(staleAction(form), /assigned to you/);
+      assert.equal(Number((await db.query("SELECT employee_id FROM client_cases WHERE id=91")).rows[0].employee_id), 200);
+    });
+  } finally { await db.query("ROLLBACK"); await db.end(); }
 });
