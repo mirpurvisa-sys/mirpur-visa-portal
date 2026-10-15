@@ -2050,3 +2050,9 @@ input, select, textarea { outline: none; }
   .attachmentsHeader, .documentItem { display: grid; }
   .documentActions { flex-wrap: wrap; }
 }
+.caseStatusBadge { display:inline-flex; align-items:center; padding:5px 10px; border-radius:20px; font-size:12px; font-weight:700; white-space:nowrap; border:1px solid; }
+.caseStatusCompleted { background:#dcfce7; color:#166534; border-color:#86efac; }
+.caseStatusOngoing { background:#eff6ff; color:#1e40af; border-color:#bfdbfe; }
+tr.caseCompletedRow > td { background:#f0fdf4; }
+.caseCompletionBanner { padding:14px 18px; margin:12px 0; border-left:4px solid #16a34a; background:#f0fdf4; color:#166534; }
+.caseCompleteButton { background:#166534; color:white; border-color:#166534; }

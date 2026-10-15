@@ -11,7 +11,7 @@ export function AdminShell({children, user}:{children:React.ReactNode; user: Cur
     <Sidebar user={user}/>
     <header className="topBar">
       <h1>Welcome <span>{displayName}</span></h1>
-      <TopbarDropdowns displayName={displayName} profileHref={profileHref} />
+      <TopbarDropdowns key={user.id} userId={user.id} displayName={displayName} profileHref={profileHref} />
     </header>
     <main className="mvcMain">{children}</main>
   </div>

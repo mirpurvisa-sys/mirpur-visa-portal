@@ -35,7 +35,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     const amount = numberValue(formData, "Amount");
     const created = await getDb().query(
       `INSERT INTO "incomes" ("Title", "IncomesType", "Amount", "Description", "Date", foreign_id, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`,
-      [text(formData, "Title"), text(formData, "IncomesType", "Appointment"), amount, nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
+      [text(formData, "Title"), text(formData, "IncomesType", "Other"), amount, nullableText(formData, "Description"), dateValue(formData, "Date"), nullableText(formData, "foreign_id")],
     );
     revalidateFinanceCache();
     await recordActivity({
@@ -96,7 +96,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
       <form action={addIncome} className="formSection">
         <div className="formGrid">
           <Field name="Title" label="Income Name" required />
-          <Field name="IncomesType" label="Income Type" defaultValue="Appointment" required />
+          <Field name="IncomesType" label="Income Type" defaultValue="Other" required />
           <Field name="Amount" label="Amount" type="number" required />
           <Field name="Date" label="Date" type="date" defaultValue={today()} required />
           <Field name="foreign_id" label="Reference / case ID" />

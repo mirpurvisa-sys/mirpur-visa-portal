@@ -9,6 +9,8 @@ import { recordActivity } from "@/lib/activityLog";
 import { nextExpenseVoucherNo } from "@/lib/erp";
 import { canCreateResource, protectFinanceData, requireResourceAccess, visibleResourceForUser } from "@/lib/permissions";
 import { revalidateFinanceCache } from "@/lib/finance";
+import { syncCaseTotals } from "@/lib/erp";
+import { syncCaseInstallmentIncome } from "@/lib/incomeSync";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,10 @@ export default async function NewPage({ params }: { params: Promise<{resource:st
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "create"), "create");
     if (res.key === "expenses") data.voucher_no = await nextExpenseVoucherNo();
     const created = await delegate(res.model).create({ data });
+    if (res.key === "case-installments" && created) {
+      await syncCaseInstallmentIncome(Number(created.id));
+      await syncCaseTotals(Number(created.client_case_id));
+    }
     if (shouldRevalidateFinance(res.key)) revalidateFinanceCache();
     await recordActivity({
       user: currentUser,

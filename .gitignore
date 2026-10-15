@@ -32,6 +32,7 @@ Thumbs.db
 *.tmp.txt
 !scripts/performance-indexes.sql
 !scripts/backfill-collected-income.sql
+!scripts/case-notifications.sql
 
 # Prisma generated artifacts can be rebuilt
 node_modules/.prisma/

@@ -1,10 +1,14 @@
 import Link from "next/link";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
+import { isCaseCompleted } from "@/lib/caseStatus";
+import { completeCase } from "@/app/admin/cases/actions";
+
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { checkboxValue, dateTimeValue, dateValue, employeeOptions, isPaidStatus, localDateTime, money, nullableText, numberValue, syncCaseTotals, text } from "@/lib/erp";
@@ -26,6 +30,9 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   const canEdit = resource ? canEditResource(user, resource) : false;
   const canDelete = resource ? canDeleteResource(user, resource) : false;
   const showFinance = canViewFinance(user);
+  const canEditFinance = canManageCaseFinance(user);
+  const installmentResource = getResource("case-installments");
+  const canDeleteInstallments = Boolean(installmentResource && canDeleteResource(user, installmentResource));
 
   const [caseRow, installments, employees, documents] = await Promise.all([
     getCase(caseId),
@@ -34,6 +41,8 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     getCaseDocuments(caseId),
   ]);
   if (!caseRow) notFound();
+  const assignedUser = await getDb().query(`SELECT user_id FROM employees WHERE id=$1`, [caseRow.employee_id]);
+  const canComplete = Number(assignedUser.rows[0]?.user_id) === user.id && !isCaseCompleted(caseRow.status);
   const documentReturnPath = `/admin/cases/${caseId}${sp.mode === "edit" ? "?mode=edit" : ""}#attachments`;
 
   async function updateClient(formData: FormData) {
@@ -73,6 +82,34 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
       ],
     );
 
+    redirect(`/admin/cases/${caseId}`);
+  }
+
+  async function updateCaseFinance(formData: FormData) {
+    "use server";
+    const currentUser = await requireUser();
+    if (!canManageCaseFinance(currentUser)) throw new Error("You do not have permission to change case finances.");
+    const total = numberValue(formData, "total");
+    const advance = numberValue(formData, "advance");
+    const fee = numberValue(formData, "appointment_fee");
+    if (total < 0 || fee < 0 || advance < 0) throw new Error("Amounts cannot be negative.");
+    const status = text(formData, "appointmentstatus", "Unpaid");
+    if (!["Paid", "Unpaid"].includes(status)) throw new Error("Invalid payment status.");
+    const db = getDb();
+    const result = await db.query(`
+      WITH changed AS (
+        UPDATE client_cases SET total=$1, advance=$5, updated_at=NOW() WHERE id=$2 RETURNING id, appointment_id
+      ), appointment AS (
+        UPDATE appointments a SET fee=$3, appointmentstatus=$4, updated_at=NOW()
+        FROM changed WHERE a.id=changed.appointment_id RETURNING a.id
+      ) SELECT id, appointment_id FROM changed
+    `, [total, caseId, fee, status, advance]);
+    if (!result.rows[0]) throw new Error("Case not found.");
+    await syncAppointmentIncome(Number(result.rows[0].appointment_id));
+    await syncCaseTotals(caseId);
+    recordActivity({ user: currentUser, action: "updated", resource: "cases", resourceTitle: "Case finances", subjectId: caseId,
+      properties: { total, advance, appointment_fee: fee, appointment_status: status } });
+    revalidatePath(`/admin/cases/${caseId}`);
     redirect(`/admin/cases/${caseId}`);
   }
 
@@ -301,6 +338,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
 
   return <>
     <form id={formId} action={updateCase} />
+    <div className={isCaseCompleted(caseRow.status) ? "caseCompletionBanner" : ""}><CaseStatusBadge status={caseRow.status} /> {isCaseCompleted(caseRow.status) ? "This case is completed." : "This case is ongoing."}</div>
 
     <section className="profileHero">
       <img className="profilePhoto" src="/avatar.svg" alt="" />
@@ -319,7 +357,8 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <span>Address</span><span>{[caseRow.address, caseRow.city, caseRow.province, caseRow.country].filter(Boolean).join(", ") || "-"}</span>
         </div>
         <div className="profileActions">
-          <Link className="btn btnYellow" href={isEdit ? `/admin/cases/${caseId}` : `/admin/cases/${caseId}?mode=edit`}>{isEdit ? "View Case" : "Edit Case"}</Link>
+          {canComplete ? <form action={completeCase}><input type="hidden" name="case_id" value={caseId} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
+          {canEdit ? <Link className="btn btnYellow" href={isEdit ? `/admin/cases/${caseId}` : `/admin/cases/${caseId}?mode=edit`}>{isEdit ? "View Case" : "Edit Case"}</Link> : null}
           <Link className="btn" href="/admin/cases">Back</Link>
           {canDelete ? <form action={deleteCase}><button className="btn dangerButton">Delete Case</button></form> : null}
         </div>
@@ -332,6 +371,14 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
       {showFinance ? <div className="casePaymentPanel">
         <div>
           <h3>Payment Details</h3>
+          {canEditFinance && !isEdit ? <form action={updateCaseFinance} className="paymentFormGrid">
+            <Field name="total" label="Total Case Fee" type="number" defaultValue={caseRow.total} required />
+            <Field name="advance" label="Advance Amount" type="number" defaultValue={caseRow.advance || 0} required />
+            <Field name="appointment_fee" label="Appointment Fee" type="number" defaultValue={caseRow.appointment_fee || 0} required />
+            <Select name="appointmentstatus" label="Appointment Payment" value={caseRow.appointmentstatus || "Unpaid"} options={["Paid", "Unpaid"]} />
+            <button className="btn btnPrimary" type="submit">Save payment details</button>
+          </form> : null}
+          {canEditFinance && !isEdit ? <p className="muted">Record received payments as installments below so collected totals and balances stay accurate.</p> : null}
           {isEdit ? <div className="paymentFormGrid">
             <Field formId={formId} name="total" label="Total Amount *" type="number" defaultValue={caseRow.total} required />
             <Field formId={formId} name="appointment_fee" label="Appointment Fee" type="number" defaultValue={caseRow.appointment_fee} readOnly />
@@ -350,15 +397,15 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
         <div>
           <h3>Installment Details</h3>
           <table className="table dataTable installmentMiniTable">
-            <thead><tr><th>Date & Time</th><th>Installment Name</th><th>Amount</th>{isEdit && canDelete ? <th>Action</th> : null}</tr></thead>
+            <thead><tr><th>Date & Time</th><th>Installment Name</th><th>Amount</th>{canEditFinance ? <th>Action</th> : null}</tr></thead>
             <tbody>{installments.length ? installments.map((item) => <tr key={item.id}>
               <td><strong>{dateTimeInput(item.time).replace("T", " ")}</strong></td>
               <td>{item.name}</td>
               <td>{plainMoney(item.amount)}</td>
-              {isEdit && canDelete ? <td><form action={deleteInstallment}><input type="hidden" name="installment_id" value={item.id}/><button className="actionBtn delete" aria-label="Delete installment"><Trash2 size={16}/></button></form></td> : null}
-            </tr>) : <tr><td colSpan={isEdit && canDelete ? 4 : 3}>No installments added.</td></tr>}</tbody>
+              {canEditFinance ? <td><Link className="btn" href={`/admin/case-installments/${item.id}/edit`}>Edit</Link>{canDeleteInstallments ? <form action={deleteInstallment}><input type="hidden" name="installment_id" value={item.id}/><button className="actionBtn delete" aria-label="Delete installment"><Trash2 size={16}/></button></form> : null}</td> : null}
+            </tr>) : <tr><td colSpan={canEditFinance ? 4 : 3}>No installments added.</td></tr>}</tbody>
           </table>
-          {isEdit ? <form action={addInstallment} className="installmentAddForm">
+          {canEditFinance ? <form action={addInstallment} className="installmentAddForm">
             <input className="input" name="name" placeholder="Installment name" required />
             <input className="input" name="amount" type="number" step="0.01" placeholder="Amount" required />
             <input className="input" name="time" type="datetime-local" defaultValue={localDateTime()} required />
@@ -411,7 +458,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <div><span>Assigned To</span><strong>{assignedTo}</strong></div>
           <div><span>Travel Dates</span><strong>{caseRow.travel_dates || "-"}</strong></div>
           <div><span>Description</span><strong>{caseRow.description || "-"}</strong></div>
-          <div><span>Case Status</span><strong>{formatStatus(caseRow.status)}</strong></div>
+          <div><span>Case Status</span><strong><CaseStatusBadge status={caseRow.status} /></strong></div>
           <div><span>Documents Note</span><strong>{caseRow.documents_note || "-"}</strong></div>
         </div>
         <table className="table dataTable statusMatrix">
