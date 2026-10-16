@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 export function SidebarActiveLink({
   children,
@@ -17,11 +17,14 @@ export function SidebarActiveLink({
   matchHrefs?: string[];
 }) {
   const pathname = usePathname();
-  const active = matchHrefs?.length
+  const searchParams = useSearchParams();
+  const [hrefPath, hrefQuery] = href.split("?");
+  const caseFilterMatches = hrefPath !== "/admin/cases" || (hrefQuery ? searchParams.get("assigned") === "me" : searchParams.get("assigned") !== "me");
+  const active = caseFilterMatches && ( matchHrefs?.length
     ? matchHrefs.some((item) => pathname === item || pathname.startsWith(`${item}/`))
     : exact
       ? pathname === href
-      : pathname === href || pathname.startsWith(`${href}/`);
+      : pathname === hrefPath || pathname.startsWith(`${hrefPath}/`));
 
   return (
     <Link aria-current={active ? "page" : undefined} href={href} className={`sideLink ${active ? "active" : ""}`}>

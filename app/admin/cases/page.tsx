@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant, isCaseOfficer, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant, isCaseOfficer } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
@@ -31,8 +31,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   const pageSize = parsePageSize(params.pageSize);
   const currentPage = parsePositiveInt(params.page, 1);
   const status = ["ongoing", "completed"].includes(params.status || "") ? params.status! : "all";
-  const ownCasesOnly = hasOwnCaseAccessOnly(user);
-  const assigned = ownCasesOnly || params.assigned === "me" ? "me" : "all";
+  const assigned = params.assigned === "me" ? "me" : "all";
 
   async function deleteCase(formData: FormData) {
     "use server";
@@ -113,7 +112,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
       <form className="legacySearch" action="/admin/cases" style={{ gap: 8, flexWrap: "wrap" }}>
         <input type="hidden" name="pageSize" value={pageSize} />
         <label>Cases:<select className="input smallSelect" name="status" defaultValue={status}><option value="all">All cases</option><option value="ongoing">Ongoing</option><option value="completed">Completed</option></select></label>
-        <label>Assigned:<select className="input" name="assigned" defaultValue={assigned}>{!ownCasesOnly ? <option value="all">All cases</option> : null}<option value="me">My assigned cases</option></select></label>
+        <label>Assigned:<select className="input" name="assigned" defaultValue={assigned}><option value="all">All cases</option><option value="me">My assigned cases</option></select></label>
         <label htmlFor="case-search">Search:<input id="case-search" className="input" name="q" defaultValue={q} placeholder="Name, ID, CNIC or phone" aria-describedby="case-search-help" /></label>
         <button className="btn" type="submit">Search</button>
       </form>

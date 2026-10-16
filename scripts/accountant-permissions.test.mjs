@@ -9,6 +9,7 @@ const ts = require("typescript");
 function evaluate(source, imports = {}, globals = {}) {
   const context = { exports: {}, ...globals, require(name) {
     if (name in imports) return imports[name];
+    if (name === "react/jsx-runtime") return require(name);
     throw new Error("Unexpected import: " + name);
   } };
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
@@ -119,7 +120,7 @@ function serverFunction(path, name, globals) {
   }
   visit(ast);
   assert.ok(found, "Missing action: " + name);
-  return evaluate("export " + found.getText(ast), {}, globals)[name];
+  return evaluate("export " + found.getText(ast).replace(/^export\s+default\s+/, ""), {}, globals)[name];
 }
 
 function actionContext(currentUser = accountant) {
@@ -284,7 +285,7 @@ const access = evaluate(readFileSync(new URL("../lib/caseAccess.ts", import.meta
 for (const officer of [user("case_officer"), user("Case Officer"), user("", { userType: "Case Officer", roleSlugs: [] })]) {
   test("officer assignment restrictions override broad permission flags: " + JSON.stringify(officer.roleSlugs), () => {
     officer.permissionSlugs = ["assign-cases", "start-cases", "delete", "edit-clients", "global-search"];
-    assert.equal(permissions.hasOwnCaseAccessOnly(officer), true);
+    assert.equal(permissions.isRestrictedCaseOfficer(officer), true);
     assert.equal(permissions.canWorkOnCase(officer, 7), true);
     assert.equal(permissions.canWorkOnCase(officer, 8), false);
     assert.equal(permissions.canAssignCases(officer), false);
@@ -302,12 +303,12 @@ for (const name of ["updateClient", "updateCase", "uploadDocuments", "deleteDocu
     assert.equal(context.queries.length, 1);
   });
 }
-test("case visibility uses session identity and preserves existing search parameters", () => {
+test("case read access permits all cases without granting write access", () => {
   const values = ["%Example%"];
   const sql = access.caseVisibilitySql(user("case_officer"), "cc", values);
-  assert.deepEqual(values, ["%Example%", 7]);
-  assert.match(sql, /user_id=\$2/);
-  assert.match(sql, /cc.employee_id/);
+  assert.deepEqual(values, ["%Example%"]);
+  assert.equal(sql, "TRUE");
+  assert.equal(access.caseVisibilitySql(user("teacher"), "cc", []), "FALSE");
   assert.throws(() => access.caseVisibilitySql(user("case_officer"), "cc; DROP TABLE clients", []));
   const adminValues = [];
   assert.equal(access.caseVisibilitySql(user("admin"), "cc", adminValues), "TRUE");
@@ -337,24 +338,44 @@ test("database isolation of case pages, search, profiles, documents and reassign
     const profile = serverFunction("../app/admin/employees/[id]/page.tsx", "getEmployee", globals);
     const assigned = serverFunction("../app/admin/employees/[id]/page.tsx", "getAssignedCases", globals);
     const officer = user("case_officer");
-    await t.test("direct case IDs return only the assigned case", async () => {
+    await t.test("officers can read assigned, other and unassigned cases", async () => {
       assert.equal(Number((await getCase(91, officer)).id), 91);
-      assert.equal(await getCase(92, officer), null);
-      assert.equal(await getCase(93, officer), null);
+      assert.equal(Number((await getCase(92, officer)).id), 92);
+      assert.equal(Number((await getCase(93, officer)).id), 93);
       assert.equal(Number((await getCase(92, user("admin"))).id), 92);
     });
-    await t.test("recent cases and searches never return another officer's records", async () => {
-      assert.deepEqual(Array.from(await search(officer, ""), x => x.href), ["/admin/cases/91"]);
-      assert.equal((await search(officer, "Other")).length, 0);
+    await t.test("all-case search includes other officers' cases", async () => {
+      assert.deepEqual(Array.from(await search(officer, ""), x => x.href), ["/admin/cases/93", "/admin/cases/92", "/admin/cases/91"]);
+      assert.equal((await search(officer, "Other")).length, 2);
       assert.equal((await search(user("admin"), "Other")).length, 2);
+    });
+    await t.test("case lists and counts switch between all and assigned, including searches", async () => {
+      const queries = [];
+      const pageGlobals = { ...globals, ...permissions,
+        requireUser: async () => officer, getResource: config.getResource, CASE_PAGE_SIZES: [25,50,100],
+        getDb: () => ({ async query(sql, values) { const result = await db.query(sql, values); queries.push({sql,values,rows:result.rows}); return result; } }),
+        Link: () => null, Eye: () => null, Pencil: () => null, Trash2: () => null,
+        CaseStatusBadge: () => null, completeCase: () => {}, isCaseCompleted: () => false,
+        formatDate: () => "-", caseListHref: () => "/admin/cases", redirect: () => { throw new Error("Unexpected redirect"); },
+      };
+      pageGlobals.parsePageSize = serverFunction("../app/admin/cases/page.tsx", "parsePageSize", pageGlobals);
+      pageGlobals.parsePositiveInt = serverFunction("../app/admin/cases/page.tsx", "parsePositiveInt", pageGlobals);
+      const page = serverFunction("../app/admin/cases/page.tsx", "CasesPage", pageGlobals);
+      for (const [params, expected] of [[{},3],[{assigned:"all"},3],[{assigned:"me"},1],[{assigned:"me",q:"Other"},0],[{assigned:"all",q:"Other"},2]]) {
+        queries.length=0;
+        await page({searchParams: Promise.resolve(params)});
+        assert.equal(queries[0].rows[0].total, expected);
+        assert.equal(queries[1].rows.length, expected);
+        if(params.assigned === "me") assert.ok(queries[1].rows.every(row => row.is_assigned));
+      }
     });
     await t.test("profile IDs and assigned lists reject another officer", async () => {
       assert.equal(Number((await profile(100, 7)).id), 100);
       assert.equal(await profile(200, 7), null);
       assert.equal((await assigned(100, officer)).length, 1);
-      assert.equal((await assigned(200, officer)).length, 0);
+      assert.equal((await assigned(200, officer)).length, 1);
     });
-    await t.test("document download rejects a different case even with a valid document ID", async () => {
+    await t.test("case readers can open documents but mismatched case/document IDs are rejected", async () => {
       await db.query("INSERT INTO documents (id,client_case_id,document) VALUES (1,91,'/own.pdf'),(2,92,'/other.pdf')");
       const route = serverFunction("../app/admin/cases/[id]/documents/[documentId]/route.ts", "GET", { ...globals,
         requireUser: async () => officer, canViewResource: permissions.canViewResource,
@@ -362,7 +383,7 @@ test("database isolation of case pages, search, profiles, documents and reassign
         NextResponse: { json: (body, options) => ({ body, status: options.status }), redirect: href => ({ href, status: 307 }) },
       });
       assert.equal((await route({}, { params: Promise.resolve({id:"91",documentId:"1"}) })).href, "/own.pdf");
-      assert.equal((await route({}, { params: Promise.resolve({id:"92",documentId:"2"}) })).status, 404);
+      assert.equal((await route({}, { params: Promise.resolve({id:"92",documentId:"2"}) })).href, "/other.pdf");
       assert.equal((await route({}, { params: Promise.resolve({id:"91",documentId:"2"}) })).status, 404);
     });
     await t.test("forged assignment cannot reassign and stale writes fail", async () => {

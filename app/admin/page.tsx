@@ -6,7 +6,7 @@ import { BriefcaseBusiness, CircleDollarSign, UsersRound, WalletCards } from "lu
 import { DashboardLiveWidgets, DashboardLiveWidgetsSkeleton } from "@/components/DashboardLiveWidgets";
 import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
-import { canCreateResource, canViewFinance, canViewResource, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import { canCreateResource, canViewFinance, canViewResource, isRestrictedCaseOfficer } from "@/lib/permissions";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
 import { APP_TODAY_SQL, RECEIVED_INCOME_CTE } from "@/lib/finance";
@@ -30,7 +30,7 @@ type DashboardItem = {
 
 export default async function AdminDashboard() {
   const user = await requireUser();
-  if (hasOwnCaseAccessOnly(user)) redirect("/admin/cases?assigned=me");
+  if (isRestrictedCaseOfficer(user)) redirect("/admin/cases?assigned=me");
   const showFinance = canViewFinance(user);
   const canSeeActivities = canViewResource(user, "daily-activities");
   const canSeeLeads = canViewResource(user, "leads");

@@ -6,7 +6,7 @@ import { completeCase } from "@/app/admin/cases/actions";
 import { notFound, redirect } from "next/navigation";
 import { Eye, MapPin, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource, canWorkOnCase, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, canWorkOnCase, isRestrictedCaseOfficer } from "@/lib/permissions";
 import type { CurrentUser } from "@/lib/auth";
 import { caseVisibilitySql } from "@/lib/caseAccess";
 import { getResource } from "@/lib/adminConfig";
@@ -56,9 +56,9 @@ export default async function EmployeeProfilePage({ params }: { params: Promise<
   if (!Number.isFinite(employeeId) || employeeId <= 0) notFound();
 
   const user = await requireUser();
-  if (!canViewResource(user, "employees") && !hasOwnCaseAccessOnly(user)) return <AccessDenied />;
+  if (!canViewResource(user, "employees") && !isRestrictedCaseOfficer(user)) return <AccessDenied />;
 
-  const employee = await getEmployee(employeeId, hasOwnCaseAccessOnly(user) ? user.id : null);
+  const employee = await getEmployee(employeeId, isRestrictedCaseOfficer(user) ? user.id : null);
   if (!employee) notFound();
 
   const casesResource = getResource("cases");

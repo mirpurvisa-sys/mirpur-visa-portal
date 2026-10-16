@@ -2,7 +2,7 @@
 
 Only administrators can create, assign, reassign or delete cases. Broad `assign-cases`, `start-cases` and `delete` permission flags do not override this rule.
 
-Case officers can view and work on cases assigned to an employee record linked to their signed-in user ID. The restriction applies to case lists and counts, pagination, search/recent results, direct workspace URLs, document downloads, and the assigned cases on their own profile. Changing query parameters or guessing another employee profile ID cannot widen access. Officers land on My Assigned Cases instead of the global dashboard and cannot access global client, appointment or employee management.
+Case officers can switch between All Cases and My Assigned Cases. All Cases includes cases assigned to other employees and unassigned cases, with read access to their workspace and documents. Search includes all cases. My Assigned Cases filters the list, counts, search and pagination by the current login. Officers can open their own employee profile; it still lists only cases assigned to that employee. Officers land on My Assigned Cases and cannot access global client, appointment or employee management.
 
 Officers can edit their assigned case and its related client details, upload/remove its documents and mark it completed. They cannot change the assignee. Server actions check the current database assignment, derive the client ID from the case, and guard operational writes against assignment changes. Case and related appointment updates execute in one SQL statement.
 

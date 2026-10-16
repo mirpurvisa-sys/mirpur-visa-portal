@@ -44,7 +44,7 @@ export function isCaseOfficer(user: CurrentUser) {
   return user.roleSlugs.some((role) => normalize(role) === "case_officer") || normalize(user.userType || "") === "case_officer";
 }
 
-export function hasOwnCaseAccessOnly(user: CurrentUser) {
+export function isRestrictedCaseOfficer(user: CurrentUser) {
   return !isAdmin(user) && isCaseOfficer(user);
 }
 

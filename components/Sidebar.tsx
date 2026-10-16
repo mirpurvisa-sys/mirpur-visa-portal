@@ -3,12 +3,12 @@ import Image from "next/image";
 import { Activity, BellRing, BriefcaseBusiness, CalendarClock, GraduationCap, LayoutDashboard, UsersRound, WalletCards } from "lucide-react";
 import { SidebarActiveLink } from "./SidebarActiveLink";
 import type { CurrentUser } from "@/lib/auth";
-import { allowedResources, canViewFinance, canViewResource } from "@/lib/permissions";
+import { allowedResources, canViewFinance, canViewResource, isRestrictedCaseOfficer } from "@/lib/permissions";
 
 export function Sidebar({ user }: { user: CurrentUser }){
   const visibleResources = allowedResources(user);
   const workflowModules = [
-    { href: "/admin/cases", label: "Client Management", icon: <BriefcaseBusiness size={18}/>, show: canViewResource(user, "cases") || canViewResource(user, "clients") },
+    { href: "/admin/cases", label: isRestrictedCaseOfficer(user) ? "All Cases" : "Client Management", icon: <BriefcaseBusiness size={18}/>, show: canViewResource(user, "cases") || canViewResource(user, "clients") },
     { href: "/admin/cases?assigned=me", label: "My Assigned Cases", icon: <BriefcaseBusiness size={18}/>, show: canViewResource(user, "cases") },
     { href: "/admin/appointments", label: "Appointments", icon: <CalendarClock size={18}/>, show: canViewResource(user, "appointments") },
     { href: "/admin/expenses", label: "Money Trail", icon: <WalletCards size={18}/>, show: canViewFinance(user) },

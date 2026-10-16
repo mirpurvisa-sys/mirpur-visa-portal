@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getCaseNotificationFeed } from "@/lib/caseNotifications";
 import { buildClientSearch, clientReferenceSql, clientSearchOrderSql } from "@/lib/clientSearch";
-import { canViewFinance, canViewResource, hasOwnCaseAccessOnly } from "@/lib/permissions";
+import { canViewFinance, canViewResource, isRestrictedCaseOfficer } from "@/lib/permissions";
 import { caseVisibilitySql } from "@/lib/caseAccess";
 import type { TopbarSearchItem } from "@/components/TopbarDropdowns";
 
@@ -37,9 +37,9 @@ function topbarScope(value: string | null): TopbarScope {
 }
 
 async function getProfileHref(user: CurrentUser) {
-  if (!canViewResource(user, "employees") && !hasOwnCaseAccessOnly(user)) return "/admin";
+  if (!canViewResource(user, "employees") && !isRestrictedCaseOfficer(user)) return "/admin";
   const result = await getDb().query(`SELECT id FROM "employees" WHERE user_id=$1 LIMIT 1`, [user.id]);
-  return result.rows[0]?.id ? `/admin/employees/${result.rows[0].id}` : hasOwnCaseAccessOnly(user) ? "/admin/cases?assigned=me" : "/admin/employees";
+  return result.rows[0]?.id ? `/admin/employees/${result.rows[0].id}` : isRestrictedCaseOfficer(user) ? "/admin/cases?assigned=me" : "/admin/employees";
 }
 
 async function getTopbarSearchItems(user: CurrentUser, query: string): Promise<TopbarSearchItem[]> {
