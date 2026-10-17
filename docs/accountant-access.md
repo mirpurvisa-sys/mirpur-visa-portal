@@ -23,3 +23,9 @@ Installment creation, edits, moves between cases and deletion synchronize the in
 Verify permissions and financial-action scope with:
 
     node scripts/accountant-permissions.test.mjs
+
+After `npm run build`, verify the compiled case view/edit forms and saved changes for admins, accountants and case officers with:
+
+    node scripts/case-workspace-production.test.mjs
+
+This starts a temporary local production server with fixture data and does not connect to the application database.

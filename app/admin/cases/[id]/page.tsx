@@ -48,21 +48,11 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   const canComplete = Number(assignedUser.rows[0]?.user_id) === user.id && !isCaseCompleted(caseRow.status);
   const documentReturnPath = `/admin/cases/${caseId}${sp.mode === "edit" ? "?mode=edit" : ""}#attachments`;
 
-  async function requireCaseWork(currentUser: Awaited<ReturnType<typeof requireUser>>) {
-    const assigned = await getDb().query(`
-      SELECT cc.client_id, cc.employee_id, e.user_id FROM client_cases cc
-      LEFT JOIN employees e ON e.id=cc.employee_id WHERE cc.id=$1
-    `, [caseId]);
-    const row = assigned.rows[0];
-    if (!row || !canWorkOnCase(currentUser, row.user_id)) throw new Error("You can only work on cases assigned to you.");
-    return row;
-  }
-
   async function updateClient(formData: FormData) {
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    const currentCase = await requireCaseWork(currentUser);
+    const currentCase = await requireCaseWork(currentUser, caseId);
 
     await getDb().query(
       `
@@ -130,7 +120,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    const currentCase = await requireCaseWork(currentUser);
+    const currentCase = await requireCaseWork(currentUser, caseId);
     const currentCanViewFinance = canViewFinance(currentUser);
     const db = getDb();
     const existing = await db.query(
@@ -274,7 +264,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    await requireCaseWork(currentUser);
+    await requireCaseWork(currentUser, caseId);
 
     const uploadedFiles = formData.getAll("documents").filter(isUploadedFile);
     if (!uploadedFiles.length) throw new Error("Please choose at least one document to upload.");
@@ -311,7 +301,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
     "use server";
     const currentUser = await requireUser();
     const currentResource = getResource("cases");
-    await requireCaseWork(currentUser);
+    await requireCaseWork(currentUser, caseId);
 
     const documentId = Number(formData.get("document_id"));
     if (!Number.isFinite(documentId)) throw new Error("Invalid document.");
@@ -498,6 +488,17 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
       </>}
     </section>
   </>;
+}
+
+// Keep this outside the page: actions may capture case IDs, but cannot serialize local functions.
+async function requireCaseWork(currentUser: CurrentUser, caseId: number) {
+  const assigned = await getDb().query(`
+    SELECT cc.client_id, cc.employee_id, e.user_id FROM client_cases cc
+    LEFT JOIN employees e ON e.id=cc.employee_id WHERE cc.id=$1
+  `, [caseId]);
+  const row = assigned.rows[0];
+  if (!row || !canWorkOnCase(currentUser, row.user_id)) throw new Error("You can only work on cases assigned to you.");
+  return row;
 }
 
 async function getCase(caseId: number, user: CurrentUser) {
