@@ -315,6 +315,83 @@ test("case read access permits all cases without granting write access", () => {
   assert.equal(adminValues.length, 0);
 });
 
+test("accountant case entry opens personal assignments and retains filters", async () => {
+  const globals = { ...permissions, requireUser: async () => accountant,
+    getResource: config.getResource, CASE_PAGE_SIZES: [25,50,100], URLSearchParams,
+    redirect: location => { throw Object.assign(new Error("redirect"), { location }); },
+  };
+  for (const name of ["parsePageSize", "parsePositiveInt", "caseListHref"]) {
+    globals[name] = serverFunction("../app/admin/cases/page.tsx", name, globals);
+  }
+  const page = serverFunction("../app/admin/cases/page.tsx", "CasesPage", globals);
+  await assert.rejects(page({ searchParams: Promise.resolve({ q: "Example", status: "ongoing", page: "2", pageSize: "50" }) }), error => {
+    const target = new URL(error.location, "https://portal.example");
+    assert.equal(target.searchParams.get("assigned"), "me");
+    assert.equal(target.searchParams.get("q"), "Example");
+    assert.equal(target.searchParams.get("status"), "ongoing");
+    assert.equal(target.searchParams.get("page"), "2");
+    assert.equal(target.searchParams.get("pageSize"), "50");
+    return true;
+  });
+  for (const assigned of ["all", "me"]) {
+    const target = new URL(globals.caseListHref({ q: "Example", assigned, page: 2, pageSize: 25 }), "https://portal.example");
+    assert.equal(target.searchParams.get("assigned"), assigned);
+  }
+});
+
+test("accountant dashboard surfaces the signed-in user's work alongside finance", async () => {
+  const viewers = [];
+  const globals = { ...permissions,
+    requireUser: async () => accountant, getResource: config.getResource, getDb: () => ({}),
+    getAssignedCaseSummary: async (_, id) => {
+      viewers.push(id);
+      return { total: 6, ongoing: 4, completed: 2, cases: [{ id: 91, client_name: "Assigned client", status: "Open" }] };
+    },
+    getDashboardStats: async () => ({}), getMoneyTrail: async () => [],
+    Link: ({ href, children }) => require("react").createElement("a", { href }, children),
+    Suspense: require("react").Suspense,
+    SummaryCard: ({ title }) => require("react").createElement("div", null, title),
+    MoneyTrailChart: () => null, DashboardLiveWidgets: () => null, DashboardLiveWidgetsSkeleton: () => null,
+    DashboardList: () => null, CaseStatusBadge: () => null,
+    UsersRound: () => null, WalletCards: () => null, CircleDollarSign: () => null, BriefcaseBusiness: () => null,
+    money: () => "0",
+  };
+  const dashboard = serverFunction("../app/admin/page.tsx", "AdminDashboard", globals);
+  const html = require("react-dom/server").renderToStaticMarkup(await dashboard());
+  assert.deepEqual(viewers, [accountant.id]);
+  assert.match(html, /My Assigned Cases/);
+  assert.match(html, /4 ongoing/);
+  assert.match(html, /2 completed/);
+  assert.match(html, /href="\/admin\/cases\/91"/);
+  assert.match(html, /Income/);
+});
+
+test("employee profile moves completed assignments below ongoing work", async () => {
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.function("btrim", value => value.trim());
+  try {
+    db.exec(`CREATE TABLE clients (id INTEGER, firstname TEXT, lastname TEXT, phone TEXT);
+      CREATE TABLE client_cases (id INTEGER, client_id INTEGER, employee_id INTEGER, client_name TEXT,
+        total NUMERIC, advance NUMERIC, remaining NUMERIC, caseCategory TEXT, startDate TEXT, endDate TEXT, status TEXT);
+      INSERT INTO clients VALUES (25,'Example','Client','');
+      INSERT INTO client_cases (id,client_id,employee_id,status,startDate) VALUES
+        (91,25,100,'Open','2026-01-01'),(94,25,100,' Completed ','2026-10-17'),
+        (95,25,100,'Open','2026-10-01'),(96,25,100,NULL,'2026-09-01'),
+        (97,25,100,'cLoSeD','2026-10-16'),(98,25,200,'Open','2026-10-17');`);
+    const assigned = serverFunction("../app/admin/employees/[id]/page.tsx", "getAssignedCases", {
+      caseVisibilitySql: access.caseVisibilitySql,
+      getDb: () => ({ query: async (sql, values) => ({ rows: db.prepare(sql).all({ $1: values[0] }) }) }),
+    });
+    const ids = async () => Array.from(await assigned(100, user("admin")), row => Number(row.id));
+    assert.deepEqual(await ids(), [95,96,91,94,97]);
+    db.exec("UPDATE client_cases SET status='Completed' WHERE id=95");
+    assert.deepEqual(await ids(), [96,91,94,97,95]);
+    db.exec("UPDATE client_cases SET status='Open' WHERE id=94");
+    assert.deepEqual(await ids(), [94,96,91,97,95]);
+  } finally { db.close(); }
+});
+
 test("database isolation of case pages, search, profiles, documents and reassignment", { skip: process.env.RUN_DATABASE_ACCESS_TESTS !== "1" }, async t => {
   require("dotenv").config({ path: ".env.local", quiet: true });
   require("dotenv").config({ quiet: true });
@@ -338,6 +415,24 @@ test("database isolation of case pages, search, profiles, documents and reassign
     const profile = serverFunction("../app/admin/employees/[id]/page.tsx", "getEmployee", globals);
     const assigned = serverFunction("../app/admin/employees/[id]/page.tsx", "getAssignedCases", globals);
     const officer = user("case_officer");
+    await t.test("accountant dashboard counts and work list follow current assignment", async () => {
+      const { getAssignedCaseSummary } = evaluate(readFileSync(new URL("../lib/caseAssignments.ts", import.meta.url), "utf8"));
+      let summary = await getAssignedCaseSummary(db, accountant.id);
+      assert.equal(summary.total, 1);
+      assert.equal(summary.ongoing, 1);
+      assert.equal(Number(summary.cases[0].id), 91);
+      await db.query("UPDATE client_cases SET status=' Closed ' WHERE id=91");
+      summary = await getAssignedCaseSummary(db, accountant.id);
+      assert.equal(summary.ongoing, 0);
+      assert.equal(summary.completed, 1);
+      assert.equal(summary.cases.length, 0);
+      await db.query("UPDATE client_cases SET employee_id=200,status='Open' WHERE id=91");
+      summary = await getAssignedCaseSummary(db, accountant.id);
+      assert.equal(summary.total, 0);
+      assert.equal(summary.cases.length, 0);
+      assert.equal((await getAssignedCaseSummary(db, 8)).total, 2);
+      await db.query("UPDATE client_cases SET employee_id=100 WHERE id=91");
+    });
     await t.test("officers can read assigned, other and unassigned cases", async () => {
       assert.equal(Number((await getCase(91, officer)).id), 91);
       assert.equal(Number((await getCase(92, officer)).id), 92);
@@ -356,10 +451,11 @@ test("database isolation of case pages, search, profiles, documents and reassign
         getDb: () => ({ async query(sql, values) { const result = await db.query(sql, values); queries.push({sql,values,rows:result.rows}); return result; } }),
         Link: () => null, Eye: () => null, Pencil: () => null, Trash2: () => null,
         CaseStatusBadge: () => null, completeCase: () => {}, isCaseCompleted: () => false,
-        formatDate: () => "-", caseListHref: () => "/admin/cases", redirect: () => { throw new Error("Unexpected redirect"); },
+        formatDate: () => "-", money: value => String(value ?? 0), caseListHref: () => "/admin/cases", redirect: () => { throw new Error("Unexpected redirect"); },
       };
       pageGlobals.parsePageSize = serverFunction("../app/admin/cases/page.tsx", "parsePageSize", pageGlobals);
       pageGlobals.parsePositiveInt = serverFunction("../app/admin/cases/page.tsx", "parsePositiveInt", pageGlobals);
+      pageGlobals.plainMoney = serverFunction("../app/admin/cases/page.tsx", "plainMoney", pageGlobals);
       const page = serverFunction("../app/admin/cases/page.tsx", "CasesPage", pageGlobals);
       for (const [params, expected] of [[{},3],[{assigned:"all"},3],[{assigned:"me"},1],[{assigned:"me",q:"Other"},0],[{assigned:"all",q:"Other"},2]]) {
         queries.length=0;
@@ -367,6 +463,15 @@ test("database isolation of case pages, search, profiles, documents and reassign
         assert.equal(queries[0].rows[0].total, expected);
         assert.equal(queries[1].rows.length, expected);
         if(params.assigned === "me") assert.ok(queries[1].rows.every(row => row.is_assigned));
+      }
+      pageGlobals.requireUser = async () => accountant;
+      const accountantPage = serverFunction("../app/admin/cases/page.tsx", "CasesPage", pageGlobals);
+      for (const [params, expected] of [[{assigned:"me"},1],[{assigned:"all"},3],[{assigned:"me",q:"Other"},0]]) {
+        queries.length = 0;
+        await accountantPage({searchParams: Promise.resolve(params)});
+        assert.equal(queries[0].rows[0].total, expected);
+        assert.equal(queries[1].rows.length, expected);
+        if (params.assigned === "me") assert.ok(queries[1].rows.every(row => row.is_assigned));
       }
     });
     await t.test("profile IDs and assigned lists reject another officer", async () => {

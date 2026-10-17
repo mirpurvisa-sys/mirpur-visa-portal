@@ -196,7 +196,8 @@ async function getAssignedCases(employeeId: number, user: CurrentUser): Promise<
       FROM "client_cases" cc
       LEFT JOIN "clients" c ON c.id = cc.client_id
       WHERE cc.employee_id=$1 AND ${visibility}
-      ORDER BY cc."startDate" DESC NULLS LAST, cc.id DESC
+      ORDER BY (lower(btrim(COALESCE(cc.status,''))) IN ('completed','closed')) ASC,
+        cc."startDate" DESC NULLS LAST, cc.id DESC
       LIMIT 100
     `,
     values,

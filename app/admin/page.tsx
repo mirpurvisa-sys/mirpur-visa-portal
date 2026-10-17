@@ -6,7 +6,9 @@ import { BriefcaseBusiness, CircleDollarSign, UsersRound, WalletCards } from "lu
 import { DashboardLiveWidgets, DashboardLiveWidgetsSkeleton } from "@/components/DashboardLiveWidgets";
 import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
-import { canCreateResource, canViewFinance, canViewResource, isRestrictedCaseOfficer } from "@/lib/permissions";
+import { canCreateResource, canViewFinance, canViewResource, isAccountant, isRestrictedCaseOfficer } from "@/lib/permissions";
+import { getAssignedCaseSummary } from "@/lib/caseAssignments";
+import { CaseStatusBadge } from "@/components/CaseStatusBadge";
 import { getDb } from "@/lib/db";
 import { money } from "@/lib/erp";
 import { APP_TODAY_SQL, RECEIVED_INCOME_CTE } from "@/lib/finance";
@@ -39,14 +41,32 @@ export default async function AdminDashboard() {
   const canCreateActivity = Boolean(dailyResource && canCreateResource(user, dailyResource));
   const canCreateLead = Boolean(leadsResource && canCreateResource(user, leadsResource));
 
-  const [stats, moneyTrail, activities, leads] = await Promise.all([
+  const [stats, moneyTrail, activities, leads, assignments] = await Promise.all([
     getDashboardStats(showFinance),
     showFinance ? getMoneyTrail() : Promise.resolve([]),
     canSeeActivities ? getTodayActivities() : Promise.resolve([]),
     canSeeLeads ? getClientLeads() : Promise.resolve([]),
+    isAccountant(user) ? getAssignedCaseSummary(getDb(), user.id) : Promise.resolve(null),
   ]);
 
   return <div className="dashboardPage">
+    {assignments ? <section className="portalCard dashboardListCard" style={{ marginBottom: 24 }}>
+      <div className="sectionHeader">
+        <div>
+          <h2>My Assigned Cases</h2>
+          <p>{assignments.ongoing} ongoing · {assignments.completed} completed · {assignments.total} total</p>
+        </div>
+        <Link className="btn btnPrimary" href="/admin/cases?assigned=me&status=ongoing">View assigned cases</Link>
+      </div>
+      <div className="dashboardList">
+        {assignments.cases.length ? assignments.cases.map((item) => <Link key={item.id} href={`/admin/cases/${item.id}`} className="dashboardListItem">
+          <strong>{item.client_name || `Case #${item.id}`}</strong>
+          <span>{[`Case #${item.id}`, item.caseCategory].filter(Boolean).join(" - ")}</span>
+          <CaseStatusBadge status={item.status} />
+        </Link>) : <p className="muted">No ongoing cases assigned to you.</p>}
+      </div>
+      <Link className="btn" href="/admin/cases?assigned=me">View all my assignments</Link>
+    </section> : null}
     <div className="summaryGrid">
       <SummaryCard icon={<UsersRound size={54} />} title="Clients" lines={[`Total: ${stats.clients}`, `Today's: ${stats.todayClients}`]} href={canViewResource(user, "clients") ? "/admin/clients" : "/admin/cases"} />
       {showFinance ? <>

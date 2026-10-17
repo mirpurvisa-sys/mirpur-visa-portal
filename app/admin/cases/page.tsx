@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant, isCaseOfficer } from "@/lib/permissions";
+import { canDeleteResource, canEditResource, canViewFinance, canViewResource, isAccountant, isAdmin, isCaseOfficer } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { buildClientSearch, clientSearchOrderSql } from "@/lib/clientSearch";
@@ -32,6 +32,9 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
   const currentPage = parsePositiveInt(params.page, 1);
   const status = ["ongoing", "completed"].includes(params.status || "") ? params.status! : "all";
   const assigned = params.assigned === "me" ? "me" : "all";
+  if (!params.assigned && isAccountant(user) && !isAdmin(user)) {
+    redirect(caseListHref({ q, status, assigned: "me", page: currentPage, pageSize }));
+  }
 
   async function deleteCase(formData: FormData) {
     "use server";
@@ -183,7 +186,7 @@ function caseListHref(params: { q: string; page: number; pageSize: number; statu
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
   if (params.status && params.status !== "all") search.set("status", params.status);
-  if (params.assigned === "me") search.set("assigned", "me");
+  if (params.assigned === "me" || params.assigned === "all") search.set("assigned", params.assigned);
   if (params.page > 1) search.set("page", String(params.page));
   if (params.pageSize !== CASE_PAGE_SIZES[0]) search.set("pageSize", String(params.pageSize));
   const queryString = search.toString();
