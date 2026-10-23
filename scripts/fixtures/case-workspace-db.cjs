@@ -22,6 +22,15 @@ class Pool {
       return role ? rows({ id, firstname: "Fixture", lastname: role, email: "fixture@example.invalid", user_type: role,
         role_slugs: [role], permission_slugs: [] }) : rows();
     }
+    if (sql.startsWith("UPDATE public.client_cases cc SET status=")) {
+      const row = cases.get(Number(values[0]));
+      if (!row) return rows();
+      const completed = ['completed','closed'].includes(String(row.status).trim().toLowerCase());
+      const undo = sql.includes("status='In Progress'");
+      if (undo ? !completed || (owner(row) !== Number(values[1]) && Number(values[1]) !== 1) : completed || owner(row) !== Number(values[1])) return rows();
+      row.status = undo ? 'In Progress' : 'Completed';
+      return rows({id:row.id});
+    }
     if (sql.includes("SELECT cc.*")) return rows({ ...cases.get(Number(values[0])) });
     if (sql.includes('FROM "case_installments"') && sql.startsWith("SELECT")) return rows();
     if (sql.includes('FROM "documents"')) return rows();

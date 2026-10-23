@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { CaseStatusBadge } from "@/components/CaseStatusBadge";
 import { isCaseCompleted } from "@/lib/caseStatus";
-import { completeCase } from "@/app/admin/cases/actions";
+import { CaseCompletionControl } from "@/components/CaseCompletionControl";
 
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { Download, FileText, MapPin, Trash2, UploadCloud } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { recordActivity } from "@/lib/activityLog";
-import { canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource, canWorkOnCase, canAssignCases } from "@/lib/permissions";
+import { isAdmin, canDeleteResource, canEditResource, canManageCaseFinance, canViewFinance, canViewResource, canWorkOnCase, canAssignCases } from "@/lib/permissions";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { caseVisibilitySql } from "@/lib/caseAccess";
@@ -45,7 +45,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
   ]);
   const assignedUser = await getDb().query(`SELECT user_id FROM employees WHERE id=$1`, [caseRow.employee_id]);
   canEdit = canWorkOnCase(user, assignedUser.rows[0]?.user_id);
-  const canComplete = Number(assignedUser.rows[0]?.user_id) === user.id && !isCaseCompleted(caseRow.status);
+  const assignedToUser = Number(assignedUser.rows[0]?.user_id) === user.id;
   const documentReturnPath = `/admin/cases/${caseId}${sp.mode === "edit" ? "?mode=edit" : ""}#attachments`;
 
   async function updateClient(formData: FormData) {
@@ -364,7 +364,7 @@ export default async function CaseWorkspace({ params, searchParams }: { params: 
           <span>Address</span><span>{[caseRow.address, caseRow.city, caseRow.province, caseRow.country].filter(Boolean).join(", ") || "-"}</span>
         </div>
         <div className="profileActions">
-          {canComplete ? <form action={completeCase}><input type="hidden" name="case_id" value={caseId} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
+          <CaseCompletionControl caseId={caseId} status={caseRow.status} assignedToUser={assignedToUser} admin={isAdmin(user)} />
           {canEdit ? <Link className="btn btnYellow" href={isEdit ? `/admin/cases/${caseId}` : `/admin/cases/${caseId}?mode=edit`}>{isEdit ? "View Case" : "Edit Case"}</Link> : null}
           <Link className="btn" href="/admin/cases">Back</Link>
           {canDelete ? <form action={deleteCase}><button className="btn dangerButton">Delete Case</button></form> : null}

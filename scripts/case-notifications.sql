@@ -65,6 +65,16 @@ BEGIN
       OR EXISTS (SELECT 1 FROM public.users_roles ur JOIN public.roles r ON r.id=ur.role_id
         WHERE ur.user_id=u.id AND r.slug='admin');
   END IF;
+  IF TG_OP = 'UPDATE' AND lower(btrim(COALESCE(OLD.status,''))) IN ('completed','closed')
+    AND lower(btrim(COALESCE(NEW.status,''))) NOT IN ('completed','closed') THEN
+    INSERT INTO public.case_notifications (recipient_user_id, case_id, event_type, message, audience)
+    SELECT u.id, NEW.id, 'case_reopened',
+      'Completion was undone for Case #' || NEW.id::text || ' (' || COALESCE(NEW.client_name,'Client') || '). The case is ongoing again.', 'admin'
+    FROM public.users u
+    WHERE lower(COALESCE(u.user_type,''))='admin'
+      OR EXISTS (SELECT 1 FROM public.users_roles ur JOIN public.roles r ON r.id=ur.role_id
+        WHERE ur.user_id=u.id AND r.slug='admin');
+  END IF;
   RETURN NEW;
 END $$;
 

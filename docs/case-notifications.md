@@ -36,3 +36,9 @@ PostgreSQL trigger and isolation tests (PowerShell):
     node scripts/case-notifications.test.mjs
 
 The integration tests create synthetic users, employees and cases in a uniquely named schema inside a transaction. All fixtures, triggers and tables are rolled back afterwards; application records are never changed.
+
+## Undoing completion
+
+Completed cases offer **Undo completed** in the case list, workspace and employee profile. The current assignee or any admin can use it to return a Completed or Closed case to **In Progress**. Other employees cannot undo completion, including through a forged submission or an old page after reassignment. Repeated clicks do not create duplicate status changes or alerts.
+
+Admins receive a private **Case reopened** alert, and the current assignee receives the usual case update. Existing completion alerts remain as history; their status badges show the current case status. Lists, totals, filters and profiles refresh after undo. Reapply the notification migration to install reopening alerts before deploying this version.

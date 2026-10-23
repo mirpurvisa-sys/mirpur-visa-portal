@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import vm from "node:vm";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import { getCaseNotificationFeed, markCaseNotificationsRead } from "../lib/caseNotifications.ts";
-import { completeAssignedCase, isCaseCompleted } from "../lib/caseStatus.ts";
+import { completeAssignedCase, reopenCompletedCase, isCaseCompleted } from "../lib/caseStatus.ts";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
@@ -198,6 +198,41 @@ describe("notification triggers and recipient isolation in PostgreSQL", { skip: 
     assert.equal(isCaseCompleted('completed'),true);
     assert.equal(isCaseCompleted('In Progress'),false);
   });
+  test("undo restores In Progress and notifies only the assignee and admins", async () => {
+    await completeAssignedCase(db,101,11);
+    assert.equal(await reopenCompletedCase(db,101,22),false);
+    assert.equal(await reopenCompletedCase(db,101,33),false);
+    assert.equal(await reopenCompletedCase(db,101,11),true);
+    assert.equal((await sql("SELECT status FROM public.client_cases WHERE id=101")).rows[0].status,'In Progress');
+    assert.equal(isCaseCompleted('In Progress'),false);
+    assert.equal((await feed(22)).unreadCount,0);
+    for (const id of [44,55]) {
+      const notification=(await feed(id)).notifications[0];
+      assert.equal(notification.title,'Case reopened');
+      assert.equal(notification.caseStatus,'In Progress');
+      assert.match(notification.message,/101.*Example A.*ongoing/);
+    }
+    assert.equal(await reopenCompletedCase(db,101,11),false);
+    assert.equal((await sql("SELECT * FROM public.case_notifications WHERE event_type='case_reopened'")).rows.length,2);
+  });
+  test("admins can undo another employee's completion by user type or admin role", async () => {
+    for (const id of [44,55]) {
+      await completeAssignedCase(db,101,11);
+      assert.equal(await reopenCompletedCase(db,101,id),true);
+    }
+  });
+  test("undo cannot reopen ongoing or missing cases, or invalid IDs", async () => {
+    assert.equal(await reopenCompletedCase(db,101,11),false);
+    assert.equal(await reopenCompletedCase(db,999,44),false);
+    for(const id of [0,-1,1.5,NaN]) await assert.rejects(reopenCompletedCase(db,id,11),/Invalid case/);
+  });
+  test("former assignees cannot undo after reassignment, but current assignee can", async () => {
+    await completeAssignedCase(db,101,11);
+    await sql("UPDATE public.client_cases SET employee_id=200 WHERE id=101");
+    assert.equal(await reopenCompletedCase(db,101,11),false);
+    assert.equal(await reopenCompletedCase(db,101,22),true);
+    assert.equal((await feed(11)).notifications.length,0);
+  });
   test("new assignments notify only the employee's linked login", async () => {
     await sql("INSERT INTO public.client_cases (id,employee_id,client_name) VALUES (303,100,'Example C')");
     const own = await feed(11);
@@ -360,4 +395,28 @@ describe("notification triggers and recipient isolation in PostgreSQL", { skip: 
     assert.equal((await feed(22)).unreadCount, 1);
     assert.equal((await feed(11)).unreadCount, 0);
   });
+});
+
+test("completion control offers undo only to the assigned employee or an admin", () => {
+  const output = ts.transpileModule(readFileSync(new URL("../components/CaseCompletionControl.tsx", import.meta.url),"utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const complete = () => {}, undo = () => {};
+  const context = {exports:{},require(name) {
+    if(name === "react/jsx-runtime") return require(name);
+    if(name === "@/app/admin/cases/actions") return {completeCase:complete,undoCaseCompletion:undo};
+    if(name === "@/lib/caseStatus") return {isCaseCompleted};
+    throw new Error(name);
+  }};
+  vm.runInNewContext(output,context);
+  const control=context.exports.CaseCompletionControl;
+  assert.equal(control({caseId:101,status:'Completed',assignedToUser:false}),null);
+  assert.equal(control({caseId:101,status:'In Progress',assignedToUser:false,admin:true}),null);
+  for(const props of [{assignedToUser:true},{assignedToUser:false,admin:true}]) {
+    const element=control({caseId:101,status:'Completed',...props});
+    assert.equal(element.props.action,undo);
+    assert.equal(element.props.children[0].props.value,101);
+    assert.equal(element.props.children[1].props.children,'Undo completed');
+  }
+  assert.equal(control({caseId:101,status:'Open',assignedToUser:true}).props.action,complete);
 });

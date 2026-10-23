@@ -37,7 +37,7 @@ async function getPage(id, path) {
 }
 function actionForm(html, formId) {
   const form = Array.from(html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g))
-    .find(match => attributes(match[1]).id === formId);
+    .find(match => attributes(match[1]).id === formId || (formId.startsWith("button:") && match[2].includes(formId.slice(7))));
   assert.ok(form, "Missing form: " + formId);
   const data = new FormData();
   for (const input of form[2].matchAll(/<input\b([^>]*)>/g)) {
@@ -77,6 +77,26 @@ try {
     assert.match(edit, /value="Pending" selected=""/);
     console.log(`PASS: user ${userId} can view, open edit, submit the compiled server action, and reload saved fields`);
   }
+  const casePath = "/admin/cases/1706";
+  async function changeCompletion(userId, label, expectedStatus) {
+    const form = actionForm(await getPage(userId,casePath), "button:" + label);
+    form.set("case_id","1706");
+    const response = await fetch(origin+casePath, {method:"POST",headers:{cookie:cookie(userId),origin},body:form,redirect:"manual",signal:AbortSignal.timeout(10000)});
+    const body = await response.text();
+    assert.ok([200,303].includes(response.status),body.slice(-1500));
+    const html=await getPage(userId,casePath);
+    assert.match(html,expectedStatus === "Completed" ? /This case is completed/ : /This case is ongoing/);
+    return html;
+  }
+  const completed = await changeCompletion(11,"Mark completed","Completed");
+  assert.match(completed,/Undo completed/);
+  assert.doesNotMatch(await getPage(9,casePath),/>Undo completed</);
+  assert.match(await getPage(1,casePath),/Undo completed/);
+  const reopened=await changeCompletion(11,"Undo completed","In Progress");
+  assert.match(reopened,/Mark completed/);
+  await changeCompletion(11,"Mark completed","Completed");
+  await changeCompletion(1,"Undo completed","In Progress");
+  console.log("PASS: compiled completion and undo forms reopen cases for assignees and admins, with read-only access for other employees");
   assert.doesNotMatch(logs, /Functions cannot be passed|Unhandled Rejection|Unexpected fixture query/);
 } catch (error) {
   console.error(logs);

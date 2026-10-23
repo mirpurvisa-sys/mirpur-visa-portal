@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CaseStatusBadge } from "@/components/CaseStatusBadge";
 import { isCaseCompleted } from "@/lib/caseStatus";
-import { completeCase } from "@/app/admin/cases/actions";
+import { CaseCompletionControl } from "@/components/CaseCompletionControl";
 
 import { redirect } from "next/navigation";
 import { Eye, Pencil, Trash2 } from "lucide-react";
@@ -160,7 +160,7 @@ export default async function CasesPage({ searchParams }: { searchParams: Promis
             <td>{formatDate(row.startDate)}</td>
             <td><CaseStatusBadge status={row.status} /></td>
             <td className="actionColumn"><div className="actionStack vertical">
-              {row.is_assigned && !isCaseCompleted(row.status) ? <form action={completeCase}><input type="hidden" name="case_id" value={row.id} /><button className="btn caseCompleteButton" type="submit">Mark completed</button></form> : null}
+              <CaseCompletionControl caseId={Number(row.id)} status={row.status} assignedToUser={Boolean(row.is_assigned)} admin={isAdmin(user)} />
               <Link className="actionBtn view" href={`/admin/cases/${row.id}`} aria-label={`View case for ${clientName}`}><Eye size={18}/></Link>
               {canEdit || ((isAccountant(user) || isCaseOfficer(user)) && row.is_assigned) ? <Link className="actionBtn edit" href={`/admin/cases/${row.id}?mode=edit`} aria-label={`Edit case for ${clientName}`}><Pencil size={18}/></Link> : null}
               {canDelete ? <form action={deleteCase}><input type="hidden" name="id" value={row.id}/><button className="actionBtn delete" aria-label={`Delete case for ${clientName}`}><Trash2 size={18}/></button></form> : null}

@@ -41,7 +41,7 @@ export async function getCaseNotificationFeed(db: NotificationDatabase, userId: 
     notifications: items.rows.map((row) => ({
       id: String(row.id),
       type: row.event_type === "case_completed" ? "Completed" : row.event_type === "case_assigned" ? "Assignment" : row.event_type.startsWith("document_") ? "Document" : "Case update",
-      title: row.event_type === "case_completed" ? "Case completed" : row.event_type === "case_assigned" ? "Case assigned" : "Case updated",
+      title: row.event_type === "case_reopened" ? "Case reopened" : row.event_type === "case_completed" ? "Case completed" : row.event_type === "case_assigned" ? "Case assigned" : "Case updated",
       message: row.message,
       href: `/admin/cases/${row.case_id}${row.event_type.startsWith("document_") ? "#attachments" : ""}`,
       time: new Date(row.created_at).toLocaleString("en-GB", {

@@ -450,7 +450,7 @@ test("database isolation of case pages, search, profiles, documents and reassign
         requireUser: async () => officer, getResource: config.getResource, CASE_PAGE_SIZES: [25,50,100],
         getDb: () => ({ async query(sql, values) { const result = await db.query(sql, values); queries.push({sql,values,rows:result.rows}); return result; } }),
         Link: () => null, Eye: () => null, Pencil: () => null, Trash2: () => null,
-        CaseStatusBadge: () => null, completeCase: () => {}, isCaseCompleted: () => false,
+        CaseStatusBadge: () => null, CaseCompletionControl: () => null, completeCase: () => {}, isCaseCompleted: () => false,
         formatDate: () => "-", money: value => String(value ?? 0), caseListHref: () => "/admin/cases", redirect: () => { throw new Error("Unexpected redirect"); },
       };
       pageGlobals.parsePageSize = serverFunction("../app/admin/cases/page.tsx", "parsePageSize", pageGlobals);
