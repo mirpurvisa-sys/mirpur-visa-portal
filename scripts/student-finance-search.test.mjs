@@ -6,11 +6,12 @@ import {test} from 'node:test';
 import {connectPortalDatabase} from './portal-database.mjs';
 const require=createRequire(import.meta.url), ts=require('typescript');
 function evaluate(path,imports={},source) {
-  const context={exports:{},URL,require(name){if(name==='react/jsx-runtime')return require(name);if(name in imports)return imports[name];throw new Error('Unexpected import '+name);}};
+  const context={exports:{},URL,URLSearchParams,require(name){if(name==='react/jsx-runtime')return require(name);if(name in imports)return imports[name];throw new Error('Unexpected import '+name);}};
   vm.runInNewContext(ts.transpileModule(source??readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,context);
   return context.exports;
 }
 const search=evaluate('../lib/recordSearch.ts');
+const studentList=evaluate('../lib/studentList.ts',{'./recordSearch':search});
 const transactions=evaluate('../lib/incomeTransactions.ts',{'./recordSearch':search});
 const finance=evaluate('../lib/finance.ts',{'next/cache':{unstable_cache:fn=>fn},'./db':{}});
 test('search escapes wildcard and SQL text, and normalizes spaced identifiers',()=>{
@@ -110,6 +111,26 @@ test('student fees reconcile once, track CRUD, and are searchable in income and 
       await query("INSERT INTO public.ielts(id,name,fee,joining_date) VALUES(91,'Date test',500,'2026-09-10')");
       const r=await query(`WITH ${finance.RECEIVED_INCOME_CTE} SELECT sum(amount) AS amount FROM received_income WHERE received_on='2026-09-10'`);
       assert.equal(Number(r.rows[0].amount),500);
+    });
+    await t.test('both student lists paginate ten newest registrations first, preserving search',async()=>{
+      for(const [course,table] of [['ielts','ielts'],['life-skills','life_skills']]) {
+        await query(`DELETE FROM public.${table}`);
+        await query(`INSERT INTO public.${table}(id,name,fee,created_at) SELECT n,'Page Fixture '||n,0,'2026-10-01'::timestamp + (n/2)*interval '1 day' FROM generate_series(1,23) n`);
+        const first=await studentList.getStudentPage({query},course,'Page Fixture','1');
+        assert.equal(first.total,23);assert.equal(first.totalPages,3);assert.equal(first.students.length,10);
+        assert.deepEqual(Array.from(first.students,row=>Number(row.id)),[23,22,21,20,19,18,17,16,15,14]);
+        const second=await studentList.getStudentPage({query},course,'Page Fixture','2');
+        assert.equal(second.offset,10);assert.equal(second.students.length,10);
+        assert.deepEqual(Array.from(second.students,row=>Number(row.id)),[13,12,11,10,9,8,7,6,5,4]);
+        const last=await studentList.getStudentPage({query},course,'Page Fixture','999');
+        assert.equal(last.page,3);assert.equal(last.students.length,3);
+        for(const invalid of ['0','-1','NaN','2.5']) assert.equal((await studentList.getStudentPage({query},course,'Page Fixture',invalid)).page,1);
+        const filtered=await studentList.getStudentPage({query},course,'Page Fixture 23','2');
+        assert.equal(filtered.total,1);assert.equal(filtered.page,1);assert.equal(Number(filtered.students[0].id),23);
+        const empty=await studentList.getStudentPage({query},course,'missing','3');
+        assert.equal(empty.total,0);assert.equal(empty.page,1);assert.equal(empty.students.length,0);
+        assert.equal(studentList.studentListHref(course,'a & b',2),`/admin/${course}?q=a+%26+b&page=2`);
+      }
     });
   }finally{await db.query('ROLLBACK');await db.end();}
 });

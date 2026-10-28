@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
-import { studentSearch } from "@/lib/recordSearch";
+import { getStudentPage, studentListHref } from "@/lib/studentList";
 import { revalidateFinanceCache } from "@/lib/finance";
 import { dateValue, nullableText, numberValue, text, today } from "@/lib/erp";
 
@@ -15,6 +15,7 @@ type StudentKey = "life-skills" | "ielts";
 type DbRow = Record<string, any>;
 
 type StudentSearchParams = {
+  page?: string;
   q?: string;
   new?: string;
   view?: string;
@@ -52,11 +53,13 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
   const viewId = Number(params.view || 0);
   const editId = Number(params.edit || 0);
 
-  const [students, viewStudent, editStudent] = await Promise.all([
-    getStudents(activeKey, query),
+  const [studentPage, viewStudent, editStudent] = await Promise.all([
+    getStudentPage(getDb(), activeKey, query, params.page),
     viewId > 0 ? getStudent(activeKey, viewId) : Promise.resolve(null),
     editId > 0 ? getStudent(activeKey, editId) : Promise.resolve(null),
   ]);
+
+  const { students, total, totalPages, page, offset } = studentPage;
 
   async function createStudent(formData: FormData) {
     "use server";
@@ -138,7 +141,7 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
         <tbody>
           {students.length === 0 ? <tr><td colSpan={9} className="emptyState">No data available in table</td></tr> : students.map((student, index) => (
             <tr key={student.id}>
-              <td>{index + 1}</td>
+              <td>{offset + index + 1}</td>
               <td><img className="tableAvatar" src="/avatar.svg" alt="" /></td>
               <td>{student.name}</td>
               <td>{student.phone}</td>
@@ -157,15 +160,13 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
           ))}
         </tbody>
       </table>
+      <nav className="paginationBar" aria-label="Student pages">
+        {page > 1 ? <Link className="btn" href={studentListHref(activeKey, query, page - 1)}>Previous</Link> : <span className="btn disabledBtn" aria-disabled="true">Previous</span>}
+        <span>Showing {students.length ? offset + 1 : 0}–{offset + students.length} of {total} students · Page {page} of {totalPages}</span>
+        {page < totalPages ? <Link className="btn" href={studentListHref(activeKey, query, page + 1)}>Next</Link> : <span className="btn disabledBtn" aria-disabled="true">Next</span>}
+      </nav>
     </section>
   </>;
-}
-
-async function getStudents(activeKey: StudentKey, query: string) {
-  const config = STUDENT_CONFIG[activeKey];
-  const search = studentSearch(query, activeKey);
-  const result = await getDb().query(`SELECT * FROM "${config.model}" WHERE ${search.condition} ORDER BY id ASC LIMIT 80`, search.values);
-  return result.rows as DbRow[];
 }
 
 async function getStudent(activeKey: StudentKey, id: number) {
