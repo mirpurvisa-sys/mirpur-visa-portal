@@ -34,7 +34,7 @@ test("accountant is recognized from a linked role or the employee designation", 
   }
 });
 
-for (const key of ["incomes", "expenses", "case-installments"]) {
+for (const key of ["incomes", "expenses", "case-installments", "ielts", "life-skills"]) {
   test(`accountant can view, create, edit and delete ${key}`, () => {
     const res = resource(key);
     assert.equal(permissions.canViewResource(accountant, key), true);
@@ -44,7 +44,7 @@ for (const key of ["incomes", "expenses", "case-installments"]) {
     assert.equal(permissions.requireResourceAccess(accountant, res), true);
   });
 }
-for (const key of ["clients", "cases", "appointments", "employees", "ielts", "life-skills"]) {
+for (const key of ["clients", "cases", "appointments", "employees"]) {
   test(`accountant can reconcile ${key} without general record-management rights`, () => {
     const res = resource(key);
     assert.equal(permissions.canViewResource(accountant, key), true);
@@ -507,4 +507,44 @@ test("database isolation of case pages, search, profiles, documents and reassign
       assert.equal(Number((await db.query("SELECT employee_id FROM client_cases WHERE id=91")).rows[0].employee_id), 200);
     });
   } finally { await db.query("ROLLBACK"); await db.end(); }
+});
+
+for (const activeKey of ["ielts", "life-skills"]) {
+  for (const name of ["createStudent", "updateStudent", "deleteStudent"]) {
+    test("accountant can execute " + name + " for " + activeKey, async () => {
+      const context = actionContext();
+      Object.assign(context.globals, { activeKey, canCreateResource: permissions.canCreateResource,
+        canDeleteResource: permissions.canDeleteResource, canViewFinance: permissions.canViewFinance,
+        STUDENT_CONFIG: {ielts:{model:"ielts"},"life-skills":{model:"life_skills"}},
+        createLifeSkill: async (_,finance) => context.calls.push(["create-life-skills",finance]),
+        createIeltsStudent: async (_,finance) => context.calls.push(["create-ielts",finance]),
+        updateLifeSkill: async (id,_,finance) => context.calls.push(["update-life-skills",id,finance]),
+        updateIeltsStudent: async (id,_,finance) => context.calls.push(["update-ielts",id,finance]),
+      });
+      const action=serverFunction("../app/admin/studentModule.tsx", name, context.globals);
+      const form=new FormData();form.set("id","88");
+      await assert.rejects(action(form),e=>e.location === "/admin/"+activeKey);
+      if(name === "deleteStudent") {
+        assert.equal(context.queries.length,1);
+        assert.equal(context.queries[0].sql,'DELETE FROM "'+(activeKey === "ielts" ? "ielts" : "life_skills")+'" WHERE id=$1');
+        assert.equal(context.queries[0].values[0],88);
+      } else {
+        assert.ok(context.calls.some(call=>call[0] === (name === "createStudent" ? "create-" : "update-")+activeKey && call.at(-1) === true));
+      }
+    });
+    test("receptionist cannot execute " + name + " for " + activeKey, async () => {
+      const context=actionContext(user("receptionist"));
+      Object.assign(context.globals,{activeKey,canCreateResource:permissions.canCreateResource,canDeleteResource:permissions.canDeleteResource});
+      const action=serverFunction("../app/admin/studentModule.tsx",name,context.globals);
+      await assert.rejects(action(new FormData()),/permission/);
+      assert.equal(context.queries.length,0);
+    });
+  }
+}
+test("student CRUD recognizes accountant designation and role variants",()=>{
+  for(const account of [user("Accountant"),user(" accountant "),user("",{userType:"Accountant",roleSlugs:[]})]) {
+    for(const key of ["ielts","life-skills"]) for(const operation of ["canViewResource","canCreateResource","canEditResource","canDeleteResource"]) {
+      assert.equal(permissions[operation](account,operation === "canViewResource" ? key : resource(key)),true);
+    }
+  }
 });

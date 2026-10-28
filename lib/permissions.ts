@@ -10,19 +10,20 @@ const ROLE_RESOURCES: Record<string, string[]> = {
 };
 
 const ROLE_CREATE_RESOURCES: Record<string, string[]> = {
-  accountant: ["incomes", "expenses", "case-installments"],
+  accountant: ["incomes", "expenses", "case-installments", "ielts", "life-skills"],
   case_officer: ["cases", "documents", "families", "reminders"],
   receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
 };
 
 const ROLE_EDIT_RESOURCES: Record<string, string[]> = {
-  accountant: ["incomes", "expenses", "case-installments"],
+  accountant: ["incomes", "expenses", "case-installments", "ielts", "life-skills"],
   case_officer: ["cases", "documents", "families", "reminders"],
   receptionist: ["clients", "appointments", "leads", "visitors", "daily-activities", "reminders"],
   teacher: ["ielts", "life-skills"],
 };
 
+const STUDENT_RESOURCE_KEYS = new Set(["ielts", "life-skills"]);
 const FINANCE_RESOURCE_KEYS = new Set(["incomes", "expenses", "case-installments"]);
 const FINANCE_FIELD_NAMES = new Set([
   "amount",
@@ -153,7 +154,7 @@ export function canEditResource(user: CurrentUser, resource: Resource) {
 export function canDeleteResource(user: CurrentUser, resource: Resource) {
   if (isAdmin(user)) return true;
   if (resource.key === "cases") return false;
-  if (isAccountant(user) && FINANCE_RESOURCE_KEYS.has(resource.key)) return true;
+  if (isAccountant(user) && (FINANCE_RESOURCE_KEYS.has(resource.key) || STUDENT_RESOURCE_KEYS.has(resource.key))) return true;
   if (FINANCE_RESOURCE_KEYS.has(resource.key)) return false;
   if (!canViewResource(user, resource.key)) return false;
   if (resource.key === "clients") return user.permissionSlugs.includes("delete-client");

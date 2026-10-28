@@ -9,7 +9,8 @@ Accountants can:
 - Update a case's fee, advance amount, appointment fee and paid/unpaid status through its Payment Details form.
 - Add installments directly from the case workspace, edit existing installments, and remove incorrect installments.
 - Update appointment payments without changing the booking's category or date.
-- View employee payroll details and student records for reconciliation, without managing their accounts or changing course/student records.
+- Create, view, edit and delete IELTS and Life Skills student records, including their fee fields.
+- View employee payroll details for reconciliation without managing employee accounts.
 - Use portal search and direct Income / Case Installments sidebar links.
 - Work on cases assigned to their own login: edit case and related client details, upload/remove case documents, and mark the case completed. The existing private assignment/update notifications also apply to accountants.
 - Use My Assigned Cases in the sidebar or the case-list assignment filter, together with Ongoing/Completed, search and pagination.
