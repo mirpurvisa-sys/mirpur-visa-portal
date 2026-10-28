@@ -79,5 +79,5 @@ export async function getReceivedIncomeTotal() {
 }
 
 export function revalidateFinanceCache() {
-  revalidateTag(FINANCE_CACHE_TAG, "max");
+  revalidateTag(FINANCE_CACHE_TAG, { expire: 0 });
 }

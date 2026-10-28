@@ -38,3 +38,5 @@ Thumbs.db
 
 # Prisma generated artifacts can be rebuilt
 node_modules/.prisma/
+
+!scripts/student-fee-income.sql

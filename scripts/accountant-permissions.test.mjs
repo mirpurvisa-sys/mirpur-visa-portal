@@ -144,6 +144,7 @@ function actionContext(currentUser = accountant) {
     syncCaseTotals: async id => calls.push(["totals", id]),
     recordActivity: () => calls.push(["activity"]),
     revalidatePath: () => calls.push(["refresh"]),
+    revalidateFinanceCache: () => calls.push(["finance-cache"]),
     redirect: path => { throw Object.assign(new Error("redirect"), { location: path }); },
   } };
 }

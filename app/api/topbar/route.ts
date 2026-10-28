@@ -3,6 +3,8 @@ import type { CurrentUser } from "@/lib/auth";
 import { requireUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getCaseNotificationFeed } from "@/lib/caseNotifications";
+import { buildRecordSearch, studentSearch } from "@/lib/recordSearch";
+import { getIncomeTransactions } from "@/lib/incomeTransactions";
 import { buildClientSearch, clientReferenceSql, clientSearchOrderSql } from "@/lib/clientSearch";
 import { canViewFinance, canViewResource, isRestrictedCaseOfficer } from "@/lib/permissions";
 import { caseVisibilitySql } from "@/lib/caseAccess";
@@ -78,6 +80,10 @@ async function getTopbarSearchItems(user: CurrentUser, query: string): Promise<T
     canViewResource(user, "cases") ? getCaseSearchItems(user, query) : Promise.resolve([]),
     canViewResource(user, "appointments") ? getAppointmentSearchItems(query) : Promise.resolve([]),
     canViewResource(user, "employees") ? getEmployeeSearchItems(query) : Promise.resolve([]),
+    canViewResource(user, "ielts") ? getStudentSearchItems(query, "ielts") : Promise.resolve([]),
+    canViewResource(user, "life-skills") ? getStudentSearchItems(query, "life-skills") : Promise.resolve([]),
+    canViewFinance(user) ? getIncomeSearchItems(query) : Promise.resolve([]),
+    canViewFinance(user) ? getExpenseSearchItems(query) : Promise.resolve([]),
   ]);
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -206,4 +212,25 @@ function displayDateTime(value: unknown) {
   const date = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(date.getTime())) return "";
   return `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
+}
+
+async function getStudentSearchItems(query: string, course: "ielts" | "life-skills"): Promise<TopbarSearchItem[]> {
+  const table = course === "ielts" ? "ielts" : "life_skills";
+  const search = studentSearch(query, course);
+  const result = await getDb().query(`SELECT id,name,phone,email,cnic FROM "${table}" WHERE ${search.condition} ORDER BY id DESC LIMIT 8`, search.values);
+  return result.rows.map(row=>({title:row.name || "Student #"+row.id,
+    subtitle:[(course === "ielts" ? "IELTS" : "Life Skills")+" #"+row.id,row.phone,row.email,row.cnic].filter(Boolean).join(" - "),
+    href: `/admin/${course}?view=${row.id}`,group:course === "ielts" ? "IELTS Students" : "Life Skills Students"}));
+}
+async function getIncomeSearchItems(query: string): Promise<TopbarSearchItem[]> {
+  return (await getIncomeTransactions(getDb(),query)).slice(0,8).map(row=>({
+    title:row.title,subtitle:[row.category,"PKR "+row.amount,row.reference].filter(Boolean).join(" - "),
+    href:row.href,group:"Income",
+  }));
+}
+
+async function getExpenseSearchItems(query: string): Promise<TopbarSearchItem[]> {
+  const search=buildRecordSearch(query,['id','voucher_no','"Title"','"ExpenseType"','"Description"','"Amount"','"Date"']);
+  const result=await getDb().query(`SELECT id,voucher_no,"Title","ExpenseType","Amount" FROM expenses WHERE ${search.condition} ORDER BY id DESC LIMIT 8`,search.values);
+  return result.rows.map(row=>({title:row.Title,subtitle:[row.voucher_no,row.ExpenseType,"PKR "+row.Amount].filter(Boolean).join(" - "),href:'/admin/expenses?view='+row.id,group:'Expenses'}));
 }

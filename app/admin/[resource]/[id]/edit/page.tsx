@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Trash2 } from "lucide-react";
+import { assertManualIncome } from "@/lib/studentIncome";
 import { getResource } from "@/lib/adminConfig";
 import { delegate, formToData, parseRecordWhere } from "@/lib/crud";
 import { ResourceForm } from "@/components/ResourceForm";
@@ -26,11 +27,13 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
   const where = parseRecordWhere(resource, id);
   const row = await delegate(resource.model).findUnique({ where });
   if(!row) notFound();
+  if (key === "incomes" && row.student_course && row.student_id) redirect(`/admin/${row.student_course}?edit=${row.student_id}`);
   async function updateAction(formData: FormData){
     "use server";
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canEditResource(currentUser, res)) throw new Error("You do not have permission to edit this record.");
+    if (res.key === "incomes") await assertManualIncome(Number(id));
     const visibleRes = visibleResourceForUser(currentUser, res);
     const data = protectFinanceData(currentUser, res, await formToData(visibleRes, formData, "edit"), "edit"); delete data.created_at;
     const previous = res.key === "case-installments" ? await delegate(res.model).findUnique({ where: parseRecordWhere(res, id) }) : null;
@@ -56,6 +59,7 @@ export default async function EditPage({ params }: { params: Promise<{resource:s
     const res = getResource(key); if(!res) throw new Error("Invalid resource");
     const currentUser = await requireUser();
     if(!canDeleteResource(currentUser, res)) throw new Error("You do not have permission to delete this record.");
+    if (res.key === "incomes") await assertManualIncome(Number(id));
     const deleted = await delegate(res.model).delete({ where: parseRecordWhere(res, id) });
     if (res.key === "case-installments" && deleted) {
       await deleteCaseInstallmentIncome(Number(deleted.id));
@@ -96,5 +100,5 @@ function AccessDenied({ title, message }: { title: string; message: string }) {
 }
 
 function shouldRevalidateFinance(resourceKey: string) {
-  return resourceKey === "incomes" || resourceKey === "expenses" || resourceKey === "case-installments";
+  return ["incomes", "expenses", "case-installments", "ielts", "life-skills"].includes(resourceKey);
 }

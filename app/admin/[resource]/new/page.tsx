@@ -69,5 +69,5 @@ function AccessDenied({ title, message }: { title: string; message: string }) {
 }
 
 function shouldRevalidateFinance(resourceKey: string) {
-  return resourceKey === "incomes" || resourceKey === "expenses" || resourceKey === "case-installments";
+  return ["incomes", "expenses", "case-installments", "ielts", "life-skills"].includes(resourceKey);
 }

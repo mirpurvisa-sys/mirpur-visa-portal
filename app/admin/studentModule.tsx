@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/auth";
 import { getResource } from "@/lib/adminConfig";
 import { getDb } from "@/lib/db";
 import { canCreateResource, canDeleteResource, canEditResource, canViewFinance, canViewResource } from "@/lib/permissions";
+import { studentSearch } from "@/lib/recordSearch";
+import { revalidateFinanceCache } from "@/lib/finance";
 import { dateValue, nullableText, numberValue, text, today } from "@/lib/erp";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +70,7 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
       await createIeltsStudent(formData, canViewFinance(currentUser));
     }
 
+    revalidateFinanceCache();
     redirect(`/admin/${activeKey}`);
   }
 
@@ -87,6 +90,7 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
       await updateIeltsStudent(id, formData, currentCanViewFinance, Number(existing?.fee || 0));
     }
 
+    revalidateFinanceCache();
     redirect(`/admin/${activeKey}`);
   }
 
@@ -97,6 +101,7 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
     if (!currentResource || !canDeleteResource(currentUser, currentResource)) throw new Error("You do not have permission to delete students.");
 
     await getDb().query(`DELETE FROM "${STUDENT_CONFIG[activeKey].model}" WHERE id=$1`, [numberValue(formData, "id")]);
+    revalidateFinanceCache();
     redirect(`/admin/${activeKey}`);
   }
 
@@ -115,6 +120,7 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
     {viewStudent ? <StudentViewModal activeKey={activeKey} row={viewStudent} /> : null}
 
     <section className="panel tableWrap studentPanel">
+      <form className="tableTools" action={`/admin/${activeKey}`}><label>Search students:<input className="input" name="q" defaultValue={query} placeholder="Name, ID, CNIC, phone, email or address" /></label><button className="btn" type="submit">Search</button></form>
       <table className="table dataTable studentLegacyTable">
         <thead>
           <tr>
@@ -157,21 +163,8 @@ export async function StudentModulePage({ activeKey, searchParams }: { activeKey
 
 async function getStudents(activeKey: StudentKey, query: string) {
   const config = STUDENT_CONFIG[activeKey];
-  const values: unknown[] = [];
-  let where = "";
-  if (query) {
-    values.push(`%${query}%`);
-    where = `
-      WHERE name ILIKE $1
-         OR email ILIKE $1
-         OR phone ILIKE $1
-         OR cnic ILIKE $1
-         OR address ILIKE $1
-         OR ${config.levelColumn} ILIKE $1
-    `;
-  }
-
-  const result = await getDb().query(`SELECT * FROM "${config.model}" ${where} ORDER BY id ASC LIMIT 80`, values);
+  const search = studentSearch(query, activeKey);
+  const result = await getDb().query(`SELECT * FROM "${config.model}" WHERE ${search.condition} ORDER BY id ASC LIMIT 80`, search.values);
   return result.rows as DbRow[];
 }
 
