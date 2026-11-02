@@ -12,13 +12,18 @@ const cases = new Map([1705, 1706].map((id, index) => [id, {
   appointmentdate: "2026-10-17 10:00", employee_firstname: "Fixture", employee_lastname: "Employee",
 }]));
 const rows = (...items) => ({ rows: items });
+const appointments = new Map([...cases.values()].map(row => [row.appointment_id, {
+  id: row.appointment_id, client_id: row.client_id, fee: row.appointment_fee,
+  appointmentstatus: row.appointmentstatus, category: row.appointment_category, appointmentdate: row.appointmentdate,
+}]));
+appointments.set(1907, { ...appointments.get(1905), id: 1907 }); // Another appointment for the same client.
 const owner = row => row.employee_id === 100 ? 9 : 11;
 class Pool {
   async query(source, values = []) {
     const sql = source.replace(/\s+/g, " ").trim();
     if (sql.includes('FROM "users" u')) {
       const id = Number(values[0]);
-      const role = { 1: "admin", 9: "accountant", 11: "case_officer" }[id];
+      const role = { 1: "admin", 9: "accountant", 11: "case_officer", 12: "receptionist" }[id];
       return role ? rows({ id, firstname: "Fixture", lastname: role, email: "fixture@example.invalid", user_type: role,
         role_slugs: [role], permission_slugs: [] }) : rows();
     }
@@ -68,6 +73,34 @@ class Pool {
       return rows();
     }
     if (sql.startsWith("WITH case_row AS")) return rows(); // Balance recalculation.
+    if (sql.startsWith("WITH updated_appointment AS")) {
+      const appointment = appointments.get(Number(values[4]));
+      if (!appointment) return rows();
+      Object.assign(appointment, { fee: values[0], appointmentstatus: values[1], category: values[2], appointmentdate: values[3] });
+      for (const row of cases.values()) if (row.client_id === appointment.client_id) {
+        Object.assign(row, { firstname: values[5], lastname: values[6], client_name: [values[5], values[6]].filter(Boolean).join(" ") });
+      }
+      return rows({ id: appointment.id, client_id: appointment.client_id });
+    }
+    if (sql.startsWith("UPDATE appointments SET fee=")) {
+      const appointment = appointments.get(Number(values[2]));
+      if (appointment) Object.assign(appointment, { fee: values[0], appointmentstatus: values[1] });
+      return rows();
+    }
+    if (sql.startsWith('SELECT fee, appointmentstatus FROM "appointments"')) return rows(appointments.get(Number(values[0])));
+    if (sql.startsWith("SELECT id FROM client_cases WHERE appointment_id=")) {
+      return { rows: [...cases.values()].filter(row => row.appointment_id === Number(values[0])).map(row => ({ id: row.id })) };
+    }
+    if (sql.includes('FROM "appointments" a') && sql.includes("COUNT(*)")) return rows({ total: appointments.size });
+    if (sql.includes('FROM "appointments" a') && sql.includes("cc.id AS case_id")) {
+      const records = [...appointments.values()].filter(appointment => !sql.includes("WHERE a.id = $1") || appointment.id === Number(values[0]));
+      return { rows: records.map(appointment => {
+        const client = [...cases.values()].find(row => row.client_id === appointment.client_id);
+        const linkedCase = [...cases.values()].find(row => row.appointment_id === appointment.id);
+        return { ...appointment, firstname: client.firstname, lastname: client.lastname, phone: client.phone,
+          case_id: linkedCase?.id, case_status: linkedCase?.status };
+      }) };
+    }
     if (sql.includes('FROM "appointments" a')) return rows(); // No received appointment payment.
     if (sql.startsWith('INSERT INTO "activity_log"')) return rows();
     throw new Error("Unexpected fixture query: " + sql.slice(0, 160));

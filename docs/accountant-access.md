@@ -25,7 +25,7 @@ Verify permissions and financial-action scope with:
 
     node scripts/accountant-permissions.test.mjs
 
-After `npm run build`, verify the compiled case view/edit forms and saved changes for admins, accountants and case officers with:
+After `npm run build`, verify the compiled case forms and appointment client-name corrections (admin/receptionist), including payment-only name restrictions for accountants, with:
 
     node scripts/case-workspace-production.test.mjs
 

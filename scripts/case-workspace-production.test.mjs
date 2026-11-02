@@ -47,10 +47,10 @@ function actionForm(html, formId) {
   assert.ok(Array.from(data.keys()).some(key => key.startsWith("$ACTION_")), "Server action was not serialized");
   return data;
 }
-async function submit(id, path, form) {
+async function submit(id, path, form, expectedLocation = /\/admin\/cases\/170[56]$/) {
   const response = await fetch(origin + path, { method: "POST", headers: { cookie: cookie(id), origin }, body: form, redirect: "manual", signal: AbortSignal.timeout(10000) });
   assert.equal(response.status, 303, (await response.text()).slice(-1500));
-  assert.match(response.headers.get("location"), /\/admin\/cases\/170[56]$/);
+  assert.match(response.headers.get("location"), expectedLocation);
 }
 try {
   while (true) {
@@ -97,6 +97,27 @@ try {
   await changeCompletion(11,"Mark completed","Completed");
   await changeCompletion(1,"Undo completed","In Progress");
   console.log("PASS: compiled completion and undo forms reopen cases for assignees and admins, with read-only access for other employees");
+  for (const userId of [1, 12]) {
+    const path = "/admin/appointments?edit=1905";
+    const html = await getPage(userId, path);
+    assert.match(html, /name="firstname"/);
+    const form = actionForm(html, "button:Save Appointment");
+    for (const [key, value] of Object.entries({ id: "1905", firstname: `Corrected${userId}`, lastname: "Client",
+      client_id: "1806", fee: "0", appointmentstatus: "Unpaid", category: "visit", appointmentdate: "2026-11-02T10:00" })) form.set(key, value);
+    await submit(userId, path, form, /^\/admin\/appointments$/);
+    assert.match(await getPage(userId, path), new RegExp(`name="firstname"[^>]*value="Corrected${userId}"`));
+    assert.match(await getPage(userId, "/admin/appointments?edit=1907"), new RegExp(`name="firstname"[^>]*value="Corrected${userId}"`));
+    assert.match(await getPage(1, "/admin/cases/1705"), new RegExp(`Corrected${userId} Client`));
+    assert.doesNotMatch(await getPage(1, "/admin/cases/1706"), new RegExp(`Corrected${userId}`));
+  }
+  const paymentHtml = await getPage(9, "/admin/appointments?edit=1905");
+  const paymentModal = paymentHtml.match(/<form[^>]*class="mvcModal appointmentEditModal"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(paymentModal);
+  assert.doesNotMatch(paymentModal, /name="firstname"|name="lastname"/);
+  const clientDisplay = Array.from(paymentModal.matchAll(/<input\b([^>]*)>/g), match => attributes(match[1]))
+    .find(input => input.name === "client_display");
+  assert.equal(clientDisplay?.readOnly, "");
+  console.log("PASS: admin and receptionist can save a corrected client name, see it on other bookings and cases, and cannot target another client; payment-only editing stays read-only for names");
   assert.doesNotMatch(logs, /Functions cannot be passed|Unhandled Rejection|Unexpected fixture query/);
 } catch (error) {
   console.error(logs);

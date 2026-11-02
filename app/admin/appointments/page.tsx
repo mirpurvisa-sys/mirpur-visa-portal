@@ -175,6 +175,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
 
     const db = getDb();
     const appointmentId = numberValue(formData, "id");
+    if (!Number.isSafeInteger(appointmentId) || appointmentId < 1) throw new Error("Invalid appointment.");
     const currentCanEditAppointmentPayments = canManageAppointmentPayments(currentUser);
     if (!canEditResource(currentUser, currentResource)) {
       const fee = numberValue(formData, "fee");
@@ -189,17 +190,35 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     }
     const existing = currentCanEditAppointmentPayments ? null : await db.query(`SELECT fee, appointmentstatus FROM "appointments" WHERE id=$1 LIMIT 1`, [appointmentId]);
     const existingRow = existing?.rows[0] || {};
+    const firstname = text(formData, "firstname");
+    const lastname = text(formData, "lastname");
+    if (!firstname) redirect(`/admin/appointments?edit=${appointmentId}&error=client_name`);
 
     const updated = await db.query(
-      `UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW() WHERE id=$5 RETURNING id`,
+      `WITH updated_appointment AS (
+        UPDATE "appointments" SET fee=$1, appointmentstatus=$2, category=$3, appointmentdate=$4, updated_at=NOW()
+        WHERE id=$5 RETURNING id, client_id
+      ), updated_client AS (
+        UPDATE "clients" c SET firstname=$6, lastname=$7, updated_at=NOW()
+        FROM updated_appointment a WHERE c.id=a.client_id
+          AND (c.firstname IS DISTINCT FROM $6 OR c.lastname IS DISTINCT FROM $7)
+        RETURNING c.id, btrim(concat_ws(' ', c.firstname, c.lastname)) AS client_name
+      ), updated_case_names AS (
+        UPDATE "client_cases" cc SET client_name=c.client_name, updated_at=NOW()
+        FROM updated_client c WHERE cc.client_id=c.id AND cc.client_name IS DISTINCT FROM c.client_name
+        RETURNING cc.id
+      ) SELECT id, client_id FROM updated_appointment`,
       [
         currentCanEditAppointmentPayments ? numberValue(formData, "fee") : Number(existingRow.fee || 0),
         currentCanEditAppointmentPayments ? text(formData, "appointmentstatus") : textFromValue(existingRow.appointmentstatus, "Unpaid"),
         text(formData, "category", "visit"),
         dateTimeValue(formData, "appointmentdate"),
         appointmentId,
+        firstname,
+        lastname,
       ],
     );
+    if (!updated.rows[0]) throw new Error("Appointment was not found.");
     await syncAppointmentIncome(appointmentId);
     await recordActivity({
       user: currentUser,
@@ -207,6 +226,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
       resource: "appointments",
       resourceTitle: "Appointment",
       subjectId: updated.rows[0]?.id ?? appointmentId,
+      properties: { client_id: updated.rows[0].client_id, fields: ["firstname", "lastname", "category", "appointmentdate"] },
     });
 
     redirect("/admin/appointments");
@@ -339,7 +359,7 @@ export default async function AppointmentsPage({ searchParams }: { searchParams:
     </div>
 
     {canCreate && params.new === "appointment" ? <AppointmentModal action={createAppointment} canEditAppointmentPayments={canEditAppointmentPayments} defaultDateTime={defaultDateTime} closeHref={listHref} clientIdentityError={params.error === "client_identity"} /> : null}
-    {canEdit && editAppointment ? <AppointmentEditModal canEditDetails={canEditDetails} action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} /> : null}
+    {canEdit && editAppointment ? <AppointmentEditModal canEditDetails={canEditDetails} action={updateAppointment} appointment={toAppointmentRow(editAppointment)} canEditAppointmentPayments={canEditAppointmentPayments} closeHref={listHref} clientNameError={params.error === "client_name"} /> : null}
     {canDelete && deleteTarget ? <DeleteAppointmentModal action={deleteAppointment} appointment={deleteTarget} closeHref={listHref} /> : null}
     {canStartCase && startCaseAppointment ? <StartCaseModal action={createCaseFromAppointment} appointment={startCaseAppointment} employees={employees} showFinance={showFinance} defaultDate={defaultDate} closeHref={listHref} /> : null}
 
@@ -551,12 +571,14 @@ function AppointmentEditModal({
   appointment,
   canEditAppointmentPayments,
   closeHref,
+  clientNameError,
 }: {
   action: (formData: FormData) => Promise<void>;
   canEditDetails: boolean;
   appointment: AppointmentRow;
   canEditAppointmentPayments: boolean;
   closeHref: string;
+  clientNameError: boolean;
 }) {
   return <div className="modalOverlay">
     <form action={action} className="mvcModal appointmentEditModal">
@@ -564,8 +586,13 @@ function AppointmentEditModal({
       <h2>Edit Appointment</h2>
       <div className="modalDivider" />
       <input type="hidden" name="id" value={appointment.id} />
+      {clientNameError ? <p className="notice errorNotice" role="alert">Enter the client's first name.</p> : null}
+      {canEditDetails ? <p className="muted">Name changes update this client's record, including their other appointments and cases.</p> : null}
       <div className="modalGrid compactModalGrid">
-        <Field name="client_display" label="Client" defaultValue={`${appointment.firstname} ${appointment.lastname}`.trim() || "-"} readOnly />
+        {canEditDetails ? <>
+          <Field name="firstname" label="First Name" defaultValue={appointment.firstname} required />
+          <Field name="lastname" label="Last Name" defaultValue={appointment.lastname} />
+        </> : <Field name="client_display" label="Client" defaultValue={`${appointment.firstname} ${appointment.lastname}`.trim() || "-"} readOnly />}
         <Field name="phone_display" label="Phone" defaultValue={appointment.phone} readOnly />
         {canEditAppointmentPayments ? <>
           <Field name="fee" label="Fee" type="number" defaultValue={appointment.fee} required />

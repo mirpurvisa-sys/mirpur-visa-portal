@@ -182,13 +182,42 @@ test("appointment payment-only action ignores forged scheduling fields", async (
   const context = actionContext();
   const action = serverFunction("../app/admin/appointments/page.tsx", "updateAppointment", context.globals);
   const form = new FormData();
-  for (const [key, value] of Object.entries({ id: "52", fee: "750", appointmentstatus: "Paid", category: "forged", appointmentdate: "1999-01-01" })) form.set(key, value);
+  for (const [key, value] of Object.entries({ id: "52", fee: "750", appointmentstatus: "Paid", category: "forged", appointmentdate: "1999-01-01", firstname: "Forged", lastname: "Name", client_id: "999" })) form.set(key, value);
   await assert.rejects(action(form), error => error.location === "/admin/appointments");
   const update = context.queries.find(q => /UPDATE appointments/.test(q.sql));
   assert.ok(update);
   assert.ok(!/category\s*=|appointmentdate\s*=/.test(update.sql));
   assert.equal(JSON.stringify(update.values), JSON.stringify([750, "Paid", 52]));
   assert.ok(context.calls.some(call => call[0] === "totals"));
+  assert.ok(!context.queries.some(query => /UPDATE "?clients"?/.test(query.sql)));
+});
+
+for (const role of ["admin", "receptionist"]) {
+  test(`${role} can correct an appointment client's name without choosing another client`, async () => {
+    const context = actionContext(user(role));
+    context.globals.dateTimeValue = (form, key) => String(form.get(key)).replace("T", " ");
+    const action = serverFunction("../app/admin/appointments/page.tsx", "updateAppointment", context.globals);
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ id: "52", firstname: " Corrected ", lastname: " Name ", client_id: "999",
+      fee: "750", appointmentstatus: "Paid", category: "online", appointmentdate: "2026-11-02T10:00" })) form.set(key, value);
+    await assert.rejects(action(form), error => error.location === "/admin/appointments");
+    const update = context.queries.find(query => query.sql.includes("updated_appointment AS"));
+    assert.ok(update);
+    assert.equal(update.values[4], 52);
+    assert.equal(update.values[5], "Corrected");
+    assert.equal(update.values[6], "Name");
+    assert.ok(!update.values.includes(999) && !update.values.includes("999"));
+    assert.match(update.sql, /c.id=a.client_id/);
+    assert.match(update.sql, /cc.client_id=c.id/);
+  });
+}
+
+test("a blank appointment client name shows an error before changing records", async () => {
+  const context = actionContext(user("admin"));
+  const action = serverFunction("../app/admin/appointments/page.tsx", "updateAppointment", context.globals);
+  const form = new FormData(); form.set("id", "52"); form.set("firstname", "   ");
+  await assert.rejects(action(form), error => error.location === "/admin/appointments?edit=52&error=client_name");
+  assert.equal(context.queries.length, 0);
 });
 
 function genericContext() {
